@@ -134,4 +134,31 @@ class TiktokPublisherConfigFormTest {
             TiktokPublisherConfigForm.validate(TiktokPublisherConfig(maxConsecutiveLoginFailures = -1))
         }
     }
+
+    @Test
+    fun `qr create and check payloads are parsed`() {
+        val png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        val session = parseTiktokQrCodeCreate(
+            """{"error_code":0,"data":{"token":"tok-1","qrcode":"$png","qrcode_index_url":"https://example.com/qr"}}""",
+        )
+        assertEquals("tok-1", session.token)
+        assertEquals("https://example.com/qr", session.qrContent)
+        assertTrue(session.qrImageBytes != null && session.qrImageBytes!!.isNotEmpty())
+
+        val waiting = parseTiktokQrCodeCheck("""{"error_code":0,"data":{"status":"1"}}""")
+        assertEquals(TiktokQrCheckStatus.WAITING, waiting.status)
+
+        val scanned = parseTiktokQrCodeCheck("""{"error_code":0,"data":{"status":"2"}}""")
+        assertEquals(TiktokQrCheckStatus.SCANNED, scanned.status)
+
+        val confirmed = parseTiktokQrCodeCheck(
+            """{"error_code":0,"data":{"status":"3","redirect_url":"https://www.douyin.com/login/callback"}}""",
+        )
+        assertEquals(TiktokQrCheckStatus.CONFIRMED, confirmed.status)
+        assertEquals("https://www.douyin.com/login/callback", confirmed.redirectUrl)
+
+        val expired = parseTiktokQrCodeCheck("""{"error_code":0,"data":{"status":"5"}}""")
+        assertEquals(TiktokQrCheckStatus.EXPIRED, expired.status)
+    }
+
 }

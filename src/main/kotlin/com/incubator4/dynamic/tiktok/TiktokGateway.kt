@@ -3,6 +3,7 @@ package com.incubator4.dynamic.tiktok
 import kotlinx.coroutines.delay
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
+import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
 
 internal interface TiktokGateway {
     fun exportCookie(): String = ""
@@ -16,6 +17,18 @@ internal interface TiktokGateway {
 
     suspend fun fetchLiveSnapshot(userId: String): TiktokLiveSnapshot {
         return TiktokLiveSnapshot(userId = userId)
+    }
+
+    suspend fun loginByQrCode(
+        onQrCode: suspend (PublisherQrLoginChallenge) -> Unit,
+        onStatusChanged: suspend (PublisherLoginResult) -> Unit,
+    ): TiktokQrLoginOutcome {
+        return TiktokQrLoginOutcome(
+            result = PublisherLoginResult(
+                status = PublisherLoginStatus.UNSUPPORTED,
+                message = "不支持抖音二维码登录",
+            ),
+        )
     }
 }
 
@@ -35,6 +48,13 @@ internal class TiktokHttpGateway(
         return withRequestInterval {
             client.fetchLiveSnapshot(userId)
         }
+    }
+
+    override suspend fun loginByQrCode(
+        onQrCode: suspend (PublisherQrLoginChallenge) -> Unit,
+        onStatusChanged: suspend (PublisherLoginResult) -> Unit,
+    ): TiktokQrLoginOutcome {
+        return client.loginByQrCode(onQrCode, onStatusChanged)
     }
 
     private suspend fun <T> withRequestInterval(block: suspend () -> T): T {

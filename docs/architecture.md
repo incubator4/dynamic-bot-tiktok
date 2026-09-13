@@ -21,7 +21,7 @@ dynamic-bot 主程序（订阅、过滤、绘图、outbox、重试）
 
 ## 对齐官方插件
 
-优先抄 [dynamic-bot-weibo](https://github.com/Colter23/dynamic-bot-weibo) 的拆分：Cookie 登录、轮询要保守。直播状态检测对齐 [dynamic-bot-bilibili](https://github.com/Colter23/dynamic-bot-bilibili) 的 `LivePayload` 与 `sourceStateStore`，但没有批量直播接口，只对启用了直播事件的订阅用户按原有保守间隔逐个查询。产品骨架对齐 [dynamic-bot-rednote](https://github.com/incubator4/dynamic-bot-rednote)。
+登录支持 Cookie 与扫码（ADR-0010）。优先抄 [dynamic-bot-weibo](https://github.com/Colter23/dynamic-bot-weibo) 的拆分：Cookie 登录、轮询要保守。直播状态检测对齐 [dynamic-bot-bilibili](https://github.com/Colter23/dynamic-bot-bilibili) 的 `LivePayload` 与 `sourceStateStore`，但没有批量直播接口，只对启用了直播事件的订阅用户按原有保守间隔逐个查询。产品骨架对齐 [dynamic-bot-rednote](https://github.com/incubator4/dynamic-bot-rednote)。
 
 | 职责 | 官方对应 | 本仓库目标 |
 | --- | --- | --- |

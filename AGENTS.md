@@ -31,7 +31,7 @@ Official reference plugins:
 1. Depend only on `dynamic-bot-core` **public** APIs (`compileOnly` in production). Never import host runtime, repository, table, loader, or event-bus packages.
 2. Publish videos through `PluginContext.sourceUpdatePublisher`. Advance cursors only when the result is not `FAILED`.
 3. Hang I/O, polling, and long work on the context `CoroutineScope` / `TaskScheduler`.
-4. Treat Douyin as risk-sensitive: conservative intervals, pause on login loss or风控, never hammer per-user APIs.
+4. Treat Douyin as risk-sensitive: conservative intervals, pause on login loss or风控, never hammer per-user APIs. Support Cookie and QR login (ADR-0010).
 5. Never commit cookies, tokens, or harvested session files. Config form labels and user-visible errors stay in 中文.
 6. Record architecture and product-scope changes in `docs/decisions.md`. Do not invent core APIs; look them up in `dynamic-bot-core`.
 7. Kotlin packages follow the Gradle `group` (`com.incubator4.dynamic`). Plugin source lives in `com.incubator4.dynamic.tiktok`, not `top.colter.dynamic.*`.
