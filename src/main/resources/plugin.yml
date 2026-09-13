@@ -1,0 +1,7 @@
+id: tiktok-publisher
+name: 抖音动态源插件
+version: ${gitVersion}
+mainClass: com.incubator4.dynamic.tiktok.TiktokPublisherPlugin
+apiVersion: 3.0.0
+description: 抖音作品轮询、Cookie 登录与订阅分发。
+author: incubator4
