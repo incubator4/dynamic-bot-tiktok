@@ -13,6 +13,10 @@ internal interface TiktokGateway {
             message = "不支持抖音登录状态检查",
         )
     }
+
+    suspend fun fetchLiveSnapshot(userId: String): TiktokLiveSnapshot {
+        return TiktokLiveSnapshot(userId = userId)
+    }
 }
 
 internal class TiktokHttpGateway(
@@ -24,6 +28,12 @@ internal class TiktokHttpGateway(
     override suspend fun checkLoginState(): PublisherLoginResult {
         return withRequestInterval {
             client.checkLoginState()
+        }
+    }
+
+    override suspend fun fetchLiveSnapshot(userId: String): TiktokLiveSnapshot {
+        return withRequestInterval {
+            client.fetchLiveSnapshot(userId)
         }
     }
 

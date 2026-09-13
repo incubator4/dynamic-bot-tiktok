@@ -22,9 +22,16 @@ internal fun JsonObject.string(vararg keys: String): String? {
     return null
 }
 
-internal fun JsonObject.boolean(key: String): Boolean? {
-    val primitive = this[key] as? JsonPrimitive ?: return null
-    return primitive.booleanOrNull
+internal fun JsonObject.boolean(vararg keys: String): Boolean? {
+    keys.forEach { key ->
+        val primitive = this[key] as? JsonPrimitive ?: return@forEach
+        primitive.booleanOrNull?.let { return it }
+        when (primitive.contentOrNull?.trim()?.lowercase()) {
+            "true", "1" -> return true
+            "false", "0" -> return false
+        }
+    }
+    return null
 }
 
 internal fun JsonObject.long(vararg keys: String): Long? {
@@ -63,8 +70,28 @@ internal fun parseJsonObject(json: String, errorMessage: String): JsonObject {
     }
 }
 
+internal fun firstNonBlank(vararg values: String?): String? {
+    return values.firstOrNull { !it.isNullOrBlank() }
+}
+
 internal fun firstHttpUrl(vararg urls: String?): String? {
     return urls.firstNotNullOfOrNull(::normalizeHttpUrl)
+}
+
+internal fun JsonObject.urlListFirst(vararg objectKeys: String): String? {
+    objectKeys.forEach { key ->
+        val obj = this.obj(key) ?: return@forEach
+        val url = obj.array("url_list", "urlList")?.firstNotNullOfOrNull { it.asTrimmedString() }
+            ?: obj.string("url", "uri")
+        firstHttpUrl(url)?.let { return it }
+    }
+    return null
+}
+
+internal fun parseTiktokEpochSeconds(raw: Long?): Long? {
+    val value = raw ?: return null
+    if (value <= 0L) return null
+    return if (value > 10_000_000_000L) value / 1_000L else value
 }
 
 internal fun normalizeHttpUrl(url: String?): String? {

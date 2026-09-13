@@ -26,12 +26,14 @@ public class TiktokPublisherPlugin private constructor(
         gatewayFactory: (TiktokPublisherConfig) -> TiktokGateway,
         saveConfig: (String, TiktokPublisherConfig) -> Unit = { _, _ -> },
         taskScheduler: TaskScheduler,
+        liveStatusStoreFactory: (() -> TiktokLiveStatusStore)? = null,
     ) : this(
         TiktokPublisherRuntime(
             loadConfig = loadConfig,
             gatewayFactory = gatewayFactory,
             saveConfig = saveConfig,
             taskScheduler = taskScheduler,
+            liveStatusStoreFactory = liveStatusStoreFactory,
         ),
     )
 

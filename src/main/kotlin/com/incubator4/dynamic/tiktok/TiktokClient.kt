@@ -10,6 +10,7 @@ import java.net.CookieManager
 import java.net.CookiePolicy
 import java.net.HttpCookie
 import java.net.URI
+import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
@@ -22,6 +23,9 @@ internal class TiktokClient(
     private val config: TiktokPublisherConfig,
     private val httpClient: HttpClient = defaultHttpClient(config.cookie),
     private val accountInfoUri: URI = URI.create(TIKTOK_ACCOUNT_INFO_URL),
+    private val userProfileUriBuilder: (String) -> URI = { userId ->
+        URI.create("$TIKTOK_HOME/user/${URLEncoder.encode(userId, StandardCharsets.UTF_8)}")
+    },
 ) {
     suspend fun checkLoginState(): PublisherLoginResult {
         val cookies = parseTiktokCookieInput(currentCookieHeader())
@@ -51,7 +55,60 @@ internal class TiktokClient(
         }
     }
 
+    suspend fun fetchLiveSnapshot(userId: String): TiktokLiveSnapshot {
+        val normalized = userId.trim()
+        require(normalized.isNotBlank()) { "抖音用户 ID 不能为空" }
+        val cookies = parseTiktokCookieInput(currentCookieHeader())
+        if (cookies.isEmpty()) {
+            throw TiktokLoginException("抖音 Cookie 未配置")
+        }
+        if (!cookies.hasLoginSession()) {
+            throw TiktokLoginException(
+                "抖音 Cookie 缺少登录会话，请从已登录的浏览器导入包含 sessionid 的完整 Cookie",
+            )
+        }
+        return try {
+            val response = fetchUserProfile(normalized, cookies.header)
+            parseLiveResponse(response.statusCode(), response.body(), normalized)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: TiktokApiException) {
+            throw error
+        } catch (error: Throwable) {
+            throw TiktokApiException(error.message ?: "抖音直播状态检查失败", error)
+        }
+    }
+
     fun exportCookieHeader(): String = currentCookieHeader()
+
+    internal fun parseLiveResponse(statusCode: Int, body: String, userId: String): TiktokLiveSnapshot {
+        if (statusCode == 401) {
+            throw TiktokLoginException("抖音登录状态不可用：HTTP $statusCode")
+        }
+        if (looksLikeRiskControl(code = null, message = "", httpStatus = statusCode)) {
+            throw TiktokBlockedException(
+                "抖音请求疑似被风控（HTTP $statusCode），已停止继续尝试。请稍后再试或更新 Cookie。",
+            )
+        }
+        if (statusCode !in 200..299) {
+            throw TiktokApiException("抖音直播状态检查失败：HTTP $statusCode")
+        }
+        val trimmed = body.trim()
+        if (trimmed.isEmpty()) {
+            throw TiktokApiException("抖音用户主页没有返回内容")
+        }
+        val payload = try {
+            extractTiktokEmbeddedPayload(trimmed)
+        } catch (error: TiktokApiException) {
+            if (looksLikeHtml(trimmed) && looksLikeLoginFailure(trimmed)) {
+                throw TiktokLoginException(
+                    "抖音 Cookie 未登录或已失效，请重新登录后导入包含 sessionid 的完整 Cookie",
+                )
+            }
+            throw error
+        }
+        return parseTiktokLiveSnapshot(payload, userId)
+    }
 
     internal fun toLoginResult(statusCode: Int, body: String): PublisherLoginResult {
         if (statusCode == 401) {
@@ -99,6 +156,16 @@ internal class TiktokClient(
         )
     }
 
+    private suspend fun fetchUserProfile(userId: String, cookieHeader: String): HttpResponse<String> {
+        return send(
+            HttpRequest.newBuilder(userProfileUriBuilder(userId))
+                .timeout(Duration.ofSeconds(15))
+                .GET()
+                .applyCommonHeaders(cookieHeader, referer = userProfileLink(userId))
+                .build(),
+        )
+    }
+
     private suspend fun send(request: HttpRequest): HttpResponse<String> {
         return withContext(Dispatchers.IO) {
             httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
@@ -137,12 +204,15 @@ internal class TiktokClient(
     }
 }
 
-private fun HttpRequest.Builder.applyCommonHeaders(cookieHeader: String): HttpRequest.Builder {
+private fun HttpRequest.Builder.applyCommonHeaders(
+    cookieHeader: String,
+    referer: String = "$TIKTOK_HOME/",
+): HttpRequest.Builder {
     header("Accept", "application/json, text/plain, */*")
     header("Accept-Language", "zh-CN,zh;q=0.9")
     header("User-Agent", DESKTOP_USER_AGENT)
     header("Origin", TIKTOK_HOME)
-    header("Referer", "$TIKTOK_HOME/")
+    header("Referer", referer)
     if (cookieHeader.isNotBlank()) {
         header("Cookie", cookieHeader)
     }

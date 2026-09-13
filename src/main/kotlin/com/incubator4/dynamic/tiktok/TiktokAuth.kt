@@ -15,6 +15,7 @@ import java.util.LinkedHashMap
 
 internal const val TIKTOK_PLATFORM_ID: String = "tiktok"
 internal const val TIKTOK_HOME: String = "https://www.douyin.com"
+internal const val TIKTOK_LIVE_HOME: String = "https://live.douyin.com"
 internal const val TIKTOK_ACCOUNT_INFO_URL: String = "https://www.douyin.com/passport/web/account/info/"
 internal const val TIKTOK_DEFAULT_AVATAR: String = "https://www.douyin.com/favicon.ico"
 
@@ -242,10 +243,6 @@ private fun parseCookieJsonObject(raw: String): TiktokCookieSet {
 private fun nestedUrlList(obj: JsonObject?): String? {
     val urls = obj?.array("url_list") ?: JsonArray(emptyList())
     return urls.firstNotNullOfOrNull { it.asTrimmedString() }
-}
-
-private fun firstNonBlank(vararg values: String?): String? {
-    return values.firstOrNull { !it.isNullOrBlank() }
 }
 
 private val LOGIN_COOKIE_NAMES: List<String> = listOf("sessionid", "sessionid_ss", "sid_tt")

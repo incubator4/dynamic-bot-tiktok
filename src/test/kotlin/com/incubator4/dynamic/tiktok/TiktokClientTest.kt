@@ -2,6 +2,7 @@ package com.incubator4.dynamic.tiktok
 
 import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.runBlocking
+import top.colter.dynamic.core.data.LiveStatus
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import java.net.InetSocketAddress
 import java.net.URI
@@ -47,6 +48,31 @@ class TiktokClientTest {
             ).checkLoginState()
             assertEquals(PublisherLoginStatus.FAILED, guest.status)
             assertTrue(guest.message.contains("未登录") || guest.message.contains("失效"))
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `fetch live snapshot parses user homepage json`() = runBlocking {
+        val server = HttpServer.create(InetSocketAddress(0), 0)
+        server.createContext("/user/") { exchange ->
+            val body = """{"user_info":{"sec_uid":"MS4w","nickname":"主播","live_status":1,"unique_id":"rid1","room_id_str":"9"}}"""
+            val bytes = body.toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        try {
+            val base = URI.create("http://127.0.0.1:${server.address.port}/user/")
+            val snapshot = TiktokClient(
+                config = TiktokPublisherConfig(cookie = "sessionid=valid"),
+                httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(),
+                userProfileUriBuilder = { userId -> URI.create("${base}$userId") },
+            ).fetchLiveSnapshot("MS4w")
+            assertEquals(LiveStatus.OPEN, snapshot.status)
+            assertEquals("MS4w", snapshot.userId)
+            assertEquals("rid1", snapshot.webRid)
         } finally {
             server.stop(0)
         }

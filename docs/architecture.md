@@ -21,7 +21,7 @@ dynamic-bot 主程序（订阅、过滤、绘图、outbox、重试）
 
 ## 对齐官方插件
 
-优先抄 [dynamic-bot-weibo](https://github.com/Colter23/dynamic-bot-weibo) 的拆分，而不是 Bilibili：抖音一期同样是 Cookie 登录、无直播、轮询要保守。产品骨架对齐 [dynamic-bot-rednote](https://github.com/incubator4/dynamic-bot-rednote)。
+优先抄 [dynamic-bot-weibo](https://github.com/Colter23/dynamic-bot-weibo) 的拆分：Cookie 登录、轮询要保守。直播状态检测对齐 [dynamic-bot-bilibili](https://github.com/Colter23/dynamic-bot-bilibili) 的 `LivePayload` 与 `sourceStateStore`，但没有批量直播接口，只对启用了直播事件的订阅用户按原有保守间隔逐个查询。产品骨架对齐 [dynamic-bot-rednote](https://github.com/incubator4/dynamic-bot-rednote)。
 
 | 职责 | 官方对应 | 本仓库目标 |
 | --- | --- | --- |
@@ -29,7 +29,8 @@ dynamic-bot 主程序（订阅、过滤、绘图、outbox、重试）
 | 生命周期与业务编排 | `*PublisherRuntime` | `TiktokPublisherRuntime` |
 | 用户可见配置 + 中文表单 | `*PublisherConfig` | `TiktokPublisherConfig` |
 | 平台 HTTP | `WeiboGateway` / `WeiboClient` | `TiktokGateway`（或拆 Client） |
-| 平台游标 | `*CursorStore` | `TiktokCursorStore`（走 `dataStore`，不要写进配置） |
+| 平台游标 | `*CursorStore` | `TiktokCursorStore`（走 `sourceStateStore`，不要写进配置） |
+| 直播状态 | `*LiveStatusStore` | `TiktokLiveStatusStore`（走 `sourceStateStore`） |
 | 平台 JSON → `DynamicPayload` | `*DynamicMapper` | `TiktokDynamicMapper` |
 | 登录失效 / 风控 | `*RequestFailureHandler` | `TiktokRequestFailureHandler` |
 | 链接解析 | `*LinkResolver` | `TiktokLinkResolver`（一期宜做） |
@@ -70,7 +71,7 @@ Kotlin 包名跟随 Gradle `group`（`com.incubator4.dynamic`），本插件源�
 | 数据 | 位置 | 原因 |
 | --- | --- | --- |
 | Cookie、轮询间隔等 | `config/{configId}.yml`（`ConfigurablePlugin`） | 用户可在后台改 |
-| 作品游标、内部缓存 | `data/plugins/{pluginId}/*.yml`（`PluginDataStore`） | 不进配置页 |
+| 作品游标、直播状态、内部缓存 | `sourceStateStore` / `PluginDataStore` | 不进配置页 |
 | 订阅关系、投递状态 | 主程序 | 插件只读 `subscriptionQueryService` / `sourceStateStore` |
 
 配置变更需要迁移时，按 core 的 `CONFIG_MIGRATION.md` 追加 `ConfigMigration`，不要 silently rename 字段。

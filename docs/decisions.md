@@ -66,9 +66,9 @@ Cookie 只存在用户本机的 `config/`，不进 git，不写进文档示例�
 
 In：Cookie 登录、用户 ID 查资料、作品轮询、`DynamicPayload` 映射、游标、风控暂停、配置表单；宜做链接解析。
 
-Out：用户名搜索、自动关注、直播、视频无水印下载、国际版 TikTok、插件独立后台页、出口协议、第二套推送通道。
+Out：用户名搜索、自动关注、视频无水印下载、国际版 TikTok、插件独立后台页、出口协议、第二套推送通道。
 
-订阅键使用抖音用户 ID。用户名 / 抖音号搜索另开 ADR。
+订阅键使用抖音用户 ID。用户名 / 抖音号搜索另开 ADR。直播开播/下播见 [ADR-0009](#adr-0009-直播开播与下播订阅)。
 
 ## ADR-0007: 构建与 API 版本
 
@@ -103,3 +103,23 @@ Out：用户名搜索、自动关注、直播、视频无水印下载、国际�
 - `plugin.yml` 的 `mainClass` 与入口类全名一致。
 - 改 `group` 时同步改包名、目录和本 ADR；不要只改一边。
 - 依赖的官方坐标仍是 `top.colter.dynamic:dynamic-bot-core`，那是别人的制品，不表示本仓库包名跟官方走。
+
+## ADR-0009: 直播开播与下播订阅
+
+- Status: Accepted
+- Date: 2026-09-13
+- Supersedes: ADR-0006 中「不做直播」的边界
+
+在已有作品订阅之外，支持抖音直播的开播 / 下播提醒。对齐 [dynamic-bot-bilibili](https://github.com/Colter23/dynamic-bot-bilibili) 的直播状态模型，而不是另做独立直播源插件。检测节奏仍按 ADR-0005 保守轮询，不另开更短的直播间隔。
+
+| 项 | 约定 |
+| --- | --- |
+| 订阅键 | 仍用抖音用户 ID，不另引入直播间 ID 作为发布者 |
+| 事件 | `live.started` / `live.ended`，载荷为 `LivePayload` |
+| 谁会被轮询 | 仅 `SubscriptionPolicy` 启用了 `LIVE_STARTED` 或 `LIVE_ENDED` 的发布者 |
+| 检测方式 | 用已登录 Cookie 读取用户主页上的公开直播态；没有批量直播接口，不对每个用户额外发明高频请求 |
+| 启动 | 先记下当前开播/未开播状态，不把「已经在播」当成新开播补发 |
+| 游标 | 直播状态走 `sourceStateStore.saveLiveStatus`；发布 `FAILED` 时不得覆盖旧状态 |
+| 配置 | `liveDetectionEnabled` 默认开启；仍受 `pollingEnabled` 与 ≥60s / ≥1s 间隔约束 |
+
+不做：直播流下载、弹幕、回放、按直播间 ID 搜索、扫全站正在直播列表、绕过平台校验的签名实现。

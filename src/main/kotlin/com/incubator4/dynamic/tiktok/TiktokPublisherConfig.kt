@@ -10,6 +10,7 @@ public data class TiktokPublisherConfig(
     val pollingIntervalSeconds: Double = 60.0,
     val requestIntervalSeconds: Double = 1.0,
     val replayWindowMinutes: Int = 0,
+    val liveDetectionEnabled: Boolean = true,
     val maxConsecutiveLoginFailures: Int = 3,
     val cookie: String = "",
 )
@@ -17,14 +18,14 @@ public data class TiktokPublisherConfig(
 public object TiktokPublisherConfigForm {
     public val spec: ConfigFormSpec = ConfigFormSpec(
         title = "抖音动态源",
-        description = "抖音账号最新作品轮询、登录状态与请求风控配置。",
+        description = "抖音账号最新作品与直播轮询、登录状态与请求风控配置。",
         fields = listOf(
             ConfigFieldSpec(
                 path = "pollingEnabled",
                 label = "启用轮询",
                 type = ConfigFieldType.BOOLEAN,
                 section = "轮询与风控",
-                description = "开启后按配置间隔检测已订阅抖音用户的新作品；关闭时插件仍可用于登录和后续资料查询。",
+                description = "开启后按配置间隔检测已订阅抖音用户的新作品和直播状态；关闭时插件仍可用于登录和后续资料查询。",
                 restartRequired = true,
                 restartTarget = "抖音插件",
             ),
@@ -33,7 +34,7 @@ public object TiktokPublisherConfigForm {
                 label = "轮询间隔（秒）",
                 type = ConfigFieldType.NUMBER,
                 section = "轮询与风控",
-                description = "多久检查一次已订阅抖音用户的新作品。建议不要低于 60 秒。",
+                description = "多久检查一次已订阅抖音用户的新作品和直播状态。建议不要低于 60 秒。",
                 min = 60,
                 restartRequired = true,
                 restartTarget = "抖音插件",
@@ -56,6 +57,13 @@ public object TiktokPublisherConfigForm {
                 description = "启动后补发最近一段时间的新作品；设为 0 时只记录当前位置，避免首次推送旧内容。",
                 min = 0,
                 numberKind = ConfigNumberKind.INTEGER,
+            ),
+            ConfigFieldSpec(
+                path = "liveDetectionEnabled",
+                label = "直播检测",
+                type = ConfigFieldType.BOOLEAN,
+                section = "作品与直播",
+                description = "是否检测开播和下播。关闭后只检测作品，不再产生直播开始和直播结束事件。",
             ),
             ConfigFieldSpec(
                 path = "maxConsecutiveLoginFailures",

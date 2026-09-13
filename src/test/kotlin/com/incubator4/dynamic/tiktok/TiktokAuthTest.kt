@@ -88,7 +88,7 @@ class TiktokPublisherConfigFormTest {
         val fields = TiktokPublisherConfigForm.spec.fields
         val sections = fields.groupBy { it.section }
 
-        assertEquals(setOf("轮询与风控"), sections.keys)
+        assertEquals(setOf("轮询与风控", "作品与直播"), sections.keys)
         assertEquals(
             listOf(
                 "pollingEnabled",
@@ -99,6 +99,7 @@ class TiktokPublisherConfigFormTest {
             ),
             sections.getValue("轮询与风控").map { it.path },
         )
+        assertEquals(listOf("liveDetectionEnabled"), sections.getValue("作品与直播").map { it.path })
         assertFalse(fields.any { it.path == "cookie" })
         assertTrue(fields.all { it.label.any { ch -> ch in '\u4e00'..'\u9fff' } })
     }

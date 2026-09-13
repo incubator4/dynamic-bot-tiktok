@@ -8,7 +8,7 @@ Read this file first. Longer rationale lives in `docs/`. Cursor also loads `.cur
 
 ## Product
 
-Subscribe to [Douyin / 抖音](https://www.douyin.com) publishers (users) and push new videos into dynamic-bot as `DynamicPayload` updates.
+Subscribe to [Douyin / 抖音](https://www.douyin.com) publishers (users) and push new videos into dynamic-bot as `DynamicPayload` updates, plus live start/end as `LivePayload`.
 
 Official reference plugins:
 
