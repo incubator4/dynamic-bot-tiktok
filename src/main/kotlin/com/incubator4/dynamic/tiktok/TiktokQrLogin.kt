@@ -128,8 +128,8 @@ internal fun parseTiktokQrCodeCheck(json: String): TiktokQrCheckResult {
         root.long("status")?.toString(),
     ).orEmpty()
     val redirectUrl = firstHttpUrl(
-        data.string("redirect_url", "redirect_uri", "url"),
-        root.string("redirect_url", "redirect_uri", "url"),
+        data.string("redirect_url", "redirect_uri"),
+        root.string("redirect_url", "redirect_uri"),
     )
     val nickname = firstNonBlank(
         data.string("nickname", "screen_name", "name"),

@@ -161,11 +161,39 @@ class TiktokPublisherRuntimeAuthTest {
         )
         runtime.onLoad(testContext())
 
-        val result = runtime.loginByQrCode(onQrCode = {}, onStatusChanged = {})
+        var challengeContent: String? = null
+        val result = runtime.loginByQrCode(
+            onQrCode = { challengeContent = it.qrContent },
+            onStatusChanged = {},
+        )
         assertEquals(PublisherLoginStatus.SUCCESS, result.status)
+        assertEquals("https://example.com/qr", challengeContent)
         assertEquals("扫码用户", result.account?.name)
         assertEquals("sessionid=qr-session; ttwid=token", savedConfig?.cookie)
         assertEquals("sessionid=qr-session; ttwid=token", runtime.exportCookie())
+    }
+
+    @Test
+    fun `qr login restores previous cookie when verification fails`() = runBlocking {
+        val gateway = RecordingTiktokGateway(
+            loginResult = PublisherLoginResult(PublisherLoginStatus.FAILED, "扫码后账号不可用"),
+            qrLoginOutcome = TiktokQrLoginOutcome(
+                result = PublisherLoginResult(PublisherLoginStatus.SUCCESS, "扫码登录成功"),
+                cookieHeader = "sessionid=qr-invalid",
+            ),
+        )
+        val runtime = TiktokPublisherRuntime(
+            loadConfig = { TiktokPublisherConfig(cookie = "sessionid=old") },
+            gatewayFactory = { gateway },
+            saveConfig = { _, _ -> },
+            taskScheduler = ManualTaskScheduler(),
+        )
+        runtime.onLoad(testContext())
+
+        val result = runtime.loginByQrCode(onQrCode = {}, onStatusChanged = {})
+        assertEquals(PublisherLoginStatus.FAILED, result.status)
+        assertEquals("sessionid=old", runtime.currentConfig().cookie)
+        assertTrue(result.message.contains("账号") || result.message.contains("校验") || result.message.contains("不可用"))
     }
 
 }
