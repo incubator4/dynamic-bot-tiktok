@@ -194,7 +194,7 @@ class TiktokPublisherConfigFormTest {
         )
         val challenge = session.toChallenge()
         assertEquals("https://example.com/qr", challenge.qrContent)
-        assertTrue(challenge.message.contains("抖音"))
+        assertTrue(challenge.message.orEmpty().contains("抖音"))
         assertTrue(challenge.instruction.orEmpty().contains("扫一扫"))
         assertEquals(TIKTOK_QR_POLL_INTERVAL_MS, challenge.statusPollIntervalMillis)
     }
