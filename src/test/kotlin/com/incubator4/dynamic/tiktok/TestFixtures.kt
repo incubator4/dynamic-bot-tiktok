@@ -140,6 +140,21 @@ internal open class RecordingTiktokGateway(
         onQrCode: suspend (PublisherQrLoginChallenge) -> Unit,
         onStatusChanged: suspend (PublisherLoginResult) -> Unit,
     ): TiktokQrLoginOutcome {
+        if (qrLoginOutcome.result.status != PublisherLoginStatus.UNSUPPORTED) {
+            onQrCode(
+                PublisherQrLoginChallenge(
+                    qrContent = "https://example.com/qr",
+                    expiresAtEpochSeconds = (System.currentTimeMillis() / 1000L) + TIKTOK_QR_EXPIRE_SECONDS,
+                    message = "请使用抖音 App 扫描二维码并确认登录",
+                    instruction = "打开抖音 App → 右上角扫一扫 → 确认登录",
+                    validityHint = "约三分钟内有效",
+                    statusPollIntervalMillis = TIKTOK_QR_POLL_INTERVAL_MS,
+                ),
+            )
+            onStatusChanged(
+                PublisherLoginResult(PublisherLoginStatus.PENDING, "请使用抖音 App 扫描二维码"),
+            )
+        }
         return qrLoginOutcome
     }
 

@@ -159,6 +159,44 @@ class TiktokPublisherConfigFormTest {
 
         val expired = parseTiktokQrCodeCheck("""{"error_code":0,"data":{"status":"5"}}""")
         assertEquals(TiktokQrCheckStatus.EXPIRED, expired.status)
+
+        val confirmedByStatusFour = parseTiktokQrCodeCheck(
+            """{"error_code":0,"data":{"status":"4","redirect_url":"https://www.douyin.com/login/callback"}}""",
+        )
+        assertEquals(TiktokQrCheckStatus.CONFIRMED, confirmedByStatusFour.status)
+
+        val blocked = parseTiktokQrCodeCheck(
+            """{"error_code":461,"data":{"description":"请求被风控拦截"}}""",
+        )
+        assertEquals(TiktokQrCheckStatus.ERROR, blocked.status)
+        assertTrue(blocked.message.contains("风控"))
+    }
+
+    @Test
+    fun `qr create rejects missing content and maps challenge`() {
+        val missingToken = assertFailsWith<TiktokLoginException> {
+            parseTiktokQrCodeCreate("""{"error_code":0,"data":{}}""")
+        }
+        assertTrue(missingToken.message!!.contains("token"))
+
+        val missingQr = assertFailsWith<TiktokLoginException> {
+            parseTiktokQrCodeCreate("""{"error_code":0,"data":{"token":"tok-only"}}""")
+        }
+        assertTrue(missingQr.message!!.contains("二维码"))
+
+        val blocked = assertFailsWith<TiktokBlockedException> {
+            parseTiktokQrCodeCreate("""{"error_code":471,"data":{"description":"人机验证"}}""")
+        }
+        assertTrue(blocked.message!!.contains("人机验证") || blocked.message!!.contains("风控"))
+
+        val session = parseTiktokQrCodeCreate(
+            """{"error_code":0,"data":{"token":"tok-2","qrcode_index_url":"https://example.com/qr"}}""",
+        )
+        val challenge = session.toChallenge()
+        assertEquals("https://example.com/qr", challenge.qrContent)
+        assertTrue(challenge.message.contains("抖音"))
+        assertTrue(challenge.instruction.orEmpty().contains("扫一扫"))
+        assertEquals(TIKTOK_QR_POLL_INTERVAL_MS, challenge.statusPollIntervalMillis)
     }
 
 }

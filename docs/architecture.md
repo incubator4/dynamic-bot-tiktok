@@ -28,7 +28,8 @@ dynamic-bot 主程序（订阅、过滤、绘图、outbox、重试）
 | 入口，只转发接口 | `*PublisherPlugin` | `TiktokPublisherPlugin` |
 | 生命周期与业务编排 | `*PublisherRuntime` | `TiktokPublisherRuntime` |
 | 用户可见配置 + 中文表单 | `*PublisherConfig` | `TiktokPublisherConfig` |
-| 平台 HTTP | `WeiboGateway` / `WeiboClient` | `TiktokGateway`（或拆 Client） |
+| 平台 HTTP | `WeiboGateway` / `WeiboClient` | `TiktokGateway` / `TiktokClient` |
+| 扫码登录 | Bilibili `loginByQrCode` | `TiktokQrLogin` + Client SSO 轮询（ADR-0010） |
 | 平台游标 | `*CursorStore` | `TiktokCursorStore`（走 `sourceStateStore`，不要写进配置） |
 | 直播状态 | `*LiveStatusStore` | `TiktokLiveStatusStore`（走 `sourceStateStore`） |
 | 平台 JSON → `DynamicPayload` | `*DynamicMapper` | `TiktokDynamicMapper` |

@@ -29,6 +29,7 @@ internal class TiktokClient(
         URI.create("$TIKTOK_HOME/user/${URLEncoder.encode(userId, StandardCharsets.UTF_8)}")
     },
     private val homeUri: URI = URI.create("$TIKTOK_HOME/"),
+    private val ssoHomeUri: URI = URI.create("$TIKTOK_SSO_HOME/"),
     private val qrCreateUri: URI = URI.create(TIKTOK_QR_CREATE_URL),
     private val qrCheckUriBuilder: (String, String) -> URI = { token, verifyFp ->
         URI.create(
@@ -137,34 +138,40 @@ internal class TiktokClient(
                     lastStatus = check.status
                     when (check.status) {
                         TiktokQrCheckStatus.WAITING -> {
-                            onStatusChanged(
-                                PublisherLoginResult(PublisherLoginStatus.PENDING, check.message),
-                            )
+                            emitQrStatus(onStatusChanged, PublisherLoginStatus.PENDING, check.message)
                         }
                         TiktokQrCheckStatus.SCANNED -> {
-                            onStatusChanged(
-                                PublisherLoginResult(PublisherLoginStatus.PENDING, check.message),
-                            )
+                            emitQrStatus(onStatusChanged, PublisherLoginStatus.PENDING, check.message)
                         }
                         TiktokQrCheckStatus.EXPIRED -> {
                             return TiktokQrLoginOutcome(
-                                result = PublisherLoginResult(PublisherLoginStatus.EXPIRED, check.message),
+                                result = emitQrStatus(
+                                    onStatusChanged,
+                                    PublisherLoginStatus.EXPIRED,
+                                    check.message,
+                                ),
                             )
                         }
                         TiktokQrCheckStatus.ERROR -> {
                             return TiktokQrLoginOutcome(
-                                result = PublisherLoginResult(PublisherLoginStatus.FAILED, check.message),
+                                result = emitQrStatus(
+                                    onStatusChanged,
+                                    PublisherLoginStatus.FAILED,
+                                    check.message,
+                                ),
                             )
                         }
                         TiktokQrCheckStatus.CONFIRMED -> {
+                            emitQrStatus(onStatusChanged, PublisherLoginStatus.PENDING, check.message)
                             finalizeQrLogin(qrClient, check.redirectUrl)
                             val cookieHeader = cookieManager.toCookieHeader()
                             val cookies = parseTiktokCookieInput(cookieHeader)
                             if (!cookies.hasLoginSession()) {
                                 return TiktokQrLoginOutcome(
-                                    result = PublisherLoginResult(
-                                        status = PublisherLoginStatus.FAILED,
-                                        message = "扫码已确认，但未拿到包含 sessionid 的登录 Cookie，请重试或改用 Cookie 登录",
+                                    result = emitQrStatus(
+                                        onStatusChanged,
+                                        PublisherLoginStatus.FAILED,
+                                        "扫码已确认，但未拿到包含 sessionid 的登录 Cookie，请重试或改用 Cookie 登录",
                                     ),
                                 )
                             }
@@ -174,12 +181,16 @@ internal class TiktokClient(
                                 accountInfoUri = accountInfoUri,
                             ).checkLoginState()
                             return if (verified.status == PublisherLoginStatus.SUCCESS) {
-                                TiktokQrLoginOutcome(result = verified, cookieHeader = cookies.header)
+                                TiktokQrLoginOutcome(
+                                    result = emitQrStatus(onStatusChanged, verified),
+                                    cookieHeader = cookies.header,
+                                )
                             } else {
                                 TiktokQrLoginOutcome(
-                                    result = PublisherLoginResult(
-                                        status = PublisherLoginStatus.FAILED,
-                                        message = verified.message.ifBlank { "扫码登录后账号状态校验失败" },
+                                    result = emitQrStatus(
+                                        onStatusChanged,
+                                        PublisherLoginStatus.FAILED,
+                                        verified.message.ifBlank { "扫码登录后账号状态校验失败" },
                                     ),
                                 )
                             }
@@ -189,25 +200,28 @@ internal class TiktokClient(
                 delay(qrPollIntervalMs)
             }
             return TiktokQrLoginOutcome(
-                result = PublisherLoginResult(
-                    status = PublisherLoginStatus.EXPIRED,
-                    message = "抖音扫码登录超时，请重新获取二维码",
+                result = emitQrStatus(
+                    onStatusChanged,
+                    PublisherLoginStatus.EXPIRED,
+                    "抖音扫码登录超时，请重新获取二维码",
                 ),
             )
         } catch (error: CancellationException) {
             throw error
         } catch (error: TiktokBlockedException) {
             return TiktokQrLoginOutcome(
-                result = PublisherLoginResult(
-                    status = PublisherLoginStatus.FAILED,
-                    message = error.message ?: "抖音扫码登录疑似被风控",
+                result = emitQrStatus(
+                    onStatusChanged,
+                    PublisherLoginStatus.FAILED,
+                    error.message ?: "抖音扫码登录疑似被风控",
                 ),
             )
         } catch (error: Throwable) {
             return TiktokQrLoginOutcome(
-                result = PublisherLoginResult(
-                    status = PublisherLoginStatus.FAILED,
-                    message = error.message ?: "抖音扫码登录失败",
+                result = emitQrStatus(
+                    onStatusChanged,
+                    PublisherLoginStatus.FAILED,
+                    error.message ?: "抖音扫码登录失败",
                 ),
             )
         }
@@ -320,15 +334,17 @@ internal class TiktokClient(
 
 
     private suspend fun warmUpQrSession(client: HttpClient) {
-        runCatching {
-            sendWithClient(
-                client,
-                HttpRequest.newBuilder(homeUri)
-                    .timeout(Duration.ofSeconds(15))
-                    .GET()
-                    .applyCommonHeaders("")
-                    .build(),
-            )
+        listOf(homeUri, ssoHomeUri).distinct().forEach { uri ->
+            runCatching {
+                sendWithClient(
+                    client,
+                    HttpRequest.newBuilder(uri)
+                        .timeout(Duration.ofSeconds(15))
+                        .GET()
+                        .applyCommonHeaders("")
+                        .build(),
+                )
+            }
         }
     }
 
@@ -428,6 +444,22 @@ internal class TiktokClient(
         return withContext(Dispatchers.IO) {
             client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
         }
+    }
+
+    private suspend fun emitQrStatus(
+        onStatusChanged: suspend (PublisherLoginResult) -> Unit,
+        status: PublisherLoginStatus,
+        message: String,
+    ): PublisherLoginResult {
+        return emitQrStatus(onStatusChanged, PublisherLoginResult(status, message))
+    }
+
+    private suspend fun emitQrStatus(
+        onStatusChanged: suspend (PublisherLoginResult) -> Unit,
+        result: PublisherLoginResult,
+    ): PublisherLoginResult {
+        onStatusChanged(result)
+        return result
     }
 
     companion object {

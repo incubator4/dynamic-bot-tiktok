@@ -149,26 +149,98 @@ class TiktokClientTest {
         server.start()
         try {
             val base = "http://127.0.0.1:${server.address.port}"
-            val outcome = TiktokClient(
-                config = TiktokPublisherConfig(),
-                httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(),
-                accountInfoUri = URI.create("$base/passport/web/account/info/"),
-                homeUri = URI.create("$base/"),
-                qrCreateUri = URI.create("$base/get_qrcode/"),
-                qrCheckUriBuilder = { token, _ -> URI.create("$base/check_qrconnect/?token=$token") },
-                qrPollIntervalMs = 10,
-                qrTimeoutMs = 2_000,
-            ).loginByQrCode(
+            val statuses = mutableListOf<PublisherLoginStatus>()
+            val outcome = qrClient(base).loginByQrCode(
                 onQrCode = { challenge ->
                     assertTrue(!challenge.qrContent.isNullOrBlank() || challenge.qrImageBytes?.isNotEmpty() == true)
                 },
-                onStatusChanged = {},
+                onStatusChanged = { statuses += it.status },
             )
             assertEquals(PublisherLoginStatus.SUCCESS, outcome.result.status)
             assertTrue(outcome.cookieHeader.orEmpty().contains("sessionid"))
+            assertTrue(PublisherLoginStatus.PENDING in statuses)
+            assertTrue(PublisherLoginStatus.SUCCESS in statuses)
         } finally {
             server.stop(0)
         }
+    }
+
+    @Test
+    fun `loginByQrCode expires when poll reports expired`() = runBlocking {
+        val server = startQrMockServer(checkBody = """{"error_code":0,"data":{"status":"5"}}""")
+        try {
+            val base = "http://127.0.0.1:${server.address.port}"
+            val statuses = mutableListOf<PublisherLoginStatus>()
+            val outcome = qrClient(base, timeoutMs = 500).loginByQrCode(
+                onQrCode = {},
+                onStatusChanged = { statuses += it.status },
+            )
+            assertEquals(PublisherLoginStatus.EXPIRED, outcome.result.status)
+            assertTrue(outcome.result.message.contains("过期"))
+            assertTrue(PublisherLoginStatus.EXPIRED in statuses)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `loginByQrCode times out while waiting`() = runBlocking {
+        val server = startQrMockServer(checkBody = """{"error_code":0,"data":{"status":"1"}}""")
+        try {
+            val base = "http://127.0.0.1:${server.address.port}"
+            val outcome = qrClient(base, pollIntervalMs = 20, timeoutMs = 80).loginByQrCode(
+                onQrCode = {},
+                onStatusChanged = {},
+            )
+            assertEquals(PublisherLoginStatus.EXPIRED, outcome.result.status)
+            assertTrue(outcome.result.message.contains("超时"))
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    private fun qrClient(
+        base: String,
+        pollIntervalMs: Long = 10,
+        timeoutMs: Long = 2_000,
+    ): TiktokClient {
+        return TiktokClient(
+            config = TiktokPublisherConfig(),
+            httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(),
+            accountInfoUri = URI.create("$base/passport/web/account/info/"),
+            homeUri = URI.create("$base/"),
+            ssoHomeUri = URI.create("$base/"),
+            qrCreateUri = URI.create("$base/get_qrcode/"),
+            qrCheckUriBuilder = { token, _ -> URI.create("$base/check_qrconnect/?token=$token") },
+            qrPollIntervalMs = pollIntervalMs,
+            qrTimeoutMs = timeoutMs,
+        )
+    }
+
+    private fun startQrMockServer(checkBody: String): HttpServer {
+        val png = Base64.getEncoder().encodeToString(
+            Base64.getDecoder().decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+            ),
+        )
+        val server = HttpServer.create(InetSocketAddress(0), 0)
+        server.createContext("/") { exchange ->
+            exchange.sendResponseHeaders(200, 0)
+            exchange.responseBody.close()
+        }
+        server.createContext("/get_qrcode/") { exchange ->
+            val body = """{"error_code":0,"data":{"token":"tok","qrcode":"$png","qrcode_index_url":"https://example.com/qr"}}"""
+            val bytes = body.toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.createContext("/check_qrconnect/") { exchange ->
+            val bytes = checkBody.toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        return server
     }
 
 }
