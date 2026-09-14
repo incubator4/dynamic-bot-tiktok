@@ -37,7 +37,7 @@ class TiktokPublisherRuntimeAuthTest {
         assertEquals("sessionid=valid; ttwid=token", savedConfig?.cookie)
         assertEquals("sessionid=valid; ttwid=token", runtime.exportCookie())
         assertTrue(PublisherLoginMethod.COOKIE in runtime.supportedLoginMethods)
-        assertFalse(PublisherLoginMethod.QR_CODE in runtime.supportedLoginMethods)
+        assertTrue(PublisherLoginMethod.QR_CODE in runtime.supportedLoginMethods)
 
         gateway.loginResult = PublisherLoginResult(PublisherLoginStatus.FAILED, "Cookie 已失效")
         val failed = runtime.loginByCookie("sessionid=guest")
@@ -46,7 +46,7 @@ class TiktokPublisherRuntimeAuthTest {
     }
 
     @Test
-    fun `empty cookie and qr login stay failed or unsupported`() = runBlocking {
+    fun `empty cookie fails and default qr gateway stays unsupported`() = runBlocking {
         val runtime = TiktokPublisherRuntime(
             loadConfig = { TiktokPublisherConfig() },
             gatewayFactory = { RecordingTiktokGateway() },
@@ -129,8 +129,43 @@ class TiktokPublisherRuntimeAuthTest {
 
         val result = plugin.loginByCookie("sessionid=ok")
         assertEquals(PublisherLoginStatus.SUCCESS, result.status)
-        assertEquals(setOf(PublisherLoginMethod.COOKIE), plugin.supportedLoginMethods)
+        assertEquals(setOf(PublisherLoginMethod.COOKIE, PublisherLoginMethod.QR_CODE), plugin.supportedLoginMethods)
         assertTrue(plugin.supportsCookieExport)
         assertEquals("sessionid=ok", plugin.exportCookie())
     }
+
+    @Test
+    fun `qr login persists cookie and bootstraps like cookie login`() = runBlocking {
+        val gateway = RecordingTiktokGateway(
+            loginResult = PublisherLoginResult(
+                status = PublisherLoginStatus.SUCCESS,
+                message = "抖音登录状态可用",
+                account = PublisherLoginAccount(userId = "u-qr", name = "扫码用户"),
+            ),
+            exportedCookie = "sessionid=qr-session; ttwid=token",
+            qrLoginOutcome = TiktokQrLoginOutcome(
+                result = PublisherLoginResult(
+                    status = PublisherLoginStatus.SUCCESS,
+                    message = "扫码登录成功",
+                    account = PublisherLoginAccount(userId = "u-qr", name = "扫码用户"),
+                ),
+                cookieHeader = "sessionid=qr-session; ttwid=token",
+            ),
+        )
+        var savedConfig: TiktokPublisherConfig? = null
+        val runtime = TiktokPublisherRuntime(
+            loadConfig = { TiktokPublisherConfig() },
+            gatewayFactory = { gateway },
+            saveConfig = { _, config -> savedConfig = config },
+            taskScheduler = ManualTaskScheduler(),
+        )
+        runtime.onLoad(testContext())
+
+        val result = runtime.loginByQrCode(onQrCode = {}, onStatusChanged = {})
+        assertEquals(PublisherLoginStatus.SUCCESS, result.status)
+        assertEquals("扫码用户", result.account?.name)
+        assertEquals("sessionid=qr-session; ttwid=token", savedConfig?.cookie)
+        assertEquals("sessionid=qr-session; ttwid=token", runtime.exportCookie())
+    }
+
 }

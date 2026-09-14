@@ -33,6 +33,7 @@ import top.colter.dynamic.core.plugin.PluginContext
 import top.colter.dynamic.core.plugin.PluginDescriptor
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
+import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
 import top.colter.dynamic.core.plugin.SourceStateStore
 import top.colter.dynamic.core.plugin.SubscriptionQueryService
 import top.colter.dynamic.core.task.TaskDefinition
@@ -107,6 +108,12 @@ internal open class RecordingTiktokGateway(
     var loginResult: PublisherLoginResult = PublisherLoginResult(PublisherLoginStatus.SUCCESS, "登录成功"),
     private val exportedCookie: String = "",
     private val liveSnapshots: MutableMap<String, MutableList<TiktokLiveSnapshot>> = mutableMapOf(),
+    var qrLoginOutcome: TiktokQrLoginOutcome = TiktokQrLoginOutcome(
+        result = PublisherLoginResult(
+            status = PublisherLoginStatus.UNSUPPORTED,
+            message = "测试网关未配置抖音二维码登录",
+        ),
+    ),
 ) : TiktokGateway {
     var loginCheckCount: Int = 0
         private set
@@ -127,6 +134,13 @@ internal open class RecordingTiktokGateway(
         } else {
             queue.removeAt(0)
         }
+    }
+
+    override suspend fun loginByQrCode(
+        onQrCode: suspend (PublisherQrLoginChallenge) -> Unit,
+        onStatusChanged: suspend (PublisherLoginResult) -> Unit,
+    ): TiktokQrLoginOutcome {
+        return qrLoginOutcome
     }
 
     fun enqueueLive(userId: String, vararg snapshots: TiktokLiveSnapshot) {

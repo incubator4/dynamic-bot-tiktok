@@ -6,6 +6,7 @@ import top.colter.dynamic.core.data.LiveStatus
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import java.net.InetSocketAddress
 import java.net.URI
+import java.util.Base64
 import java.net.http.HttpClient
 import java.time.Duration
 import kotlin.test.Test
@@ -99,4 +100,75 @@ class TiktokClientTest {
         assertEquals(PublisherLoginStatus.FAILED, result.status)
         assertTrue(result.message.contains("登录状态不可用"))
     }
+
+    @Test
+    fun `loginByQrCode completes after confirmed poll`() = runBlocking {
+        val png = Base64.getEncoder().encodeToString(
+            Base64.getDecoder().decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+            ),
+        )
+        var pollCount = 0
+        val server = HttpServer.create(InetSocketAddress(0), 0)
+        server.createContext("/") { exchange ->
+            exchange.sendResponseHeaders(200, 0)
+            exchange.responseBody.close()
+        }
+        server.createContext("/get_qrcode/") { exchange ->
+            val body = """{"error_code":0,"data":{"token":"tok","qrcode":"$png","qrcode_index_url":"https://example.com/qr"}}"""
+            val bytes = body.toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.createContext("/check_qrconnect/") { exchange ->
+            pollCount += 1
+            val body = if (pollCount == 1) {
+                """{"error_code":0,"data":{"status":"1"}}"""
+            } else {
+                """{"error_code":0,"data":{"status":"3","redirect_url":"http://127.0.0.1:${server.address.port}/callback"}}"""
+            }
+            val bytes = body.toByteArray()
+            // set login cookie on confirm
+            if (pollCount > 1) {
+                exchange.responseHeaders.add("Set-Cookie", "sessionid=qr-ok; Path=/; Domain=127.0.0.1")
+            }
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.createContext("/callback") { exchange ->
+            exchange.responseHeaders.add("Set-Cookie", "sessionid=qr-ok; Path=/")
+            exchange.sendResponseHeaders(200, 0)
+            exchange.responseBody.close()
+        }
+        server.createContext("/passport/web/account/info/") { exchange ->
+            val body = """{"message":"success","data":{"user_id_str":"qr-user","screen_name":"扫码账号"}}"""
+            val bytes = body.toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        try {
+            val base = "http://127.0.0.1:${server.address.port}"
+            val outcome = TiktokClient(
+                config = TiktokPublisherConfig(),
+                httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(),
+                accountInfoUri = URI.create("$base/passport/web/account/info/"),
+                homeUri = URI.create("$base/"),
+                qrCreateUri = URI.create("$base/get_qrcode/"),
+                qrCheckUriBuilder = { token, _ -> URI.create("$base/check_qrconnect/?token=$token") },
+                qrPollIntervalMs = 10,
+                qrTimeoutMs = 2_000,
+            ).loginByQrCode(
+                onQrCode = { challenge ->
+                    assertTrue(!challenge.qrContent.isNullOrBlank() || challenge.qrImageBytes?.isNotEmpty() == true)
+                },
+                onStatusChanged = {},
+            )
+            assertEquals(PublisherLoginStatus.SUCCESS, outcome.result.status)
+            assertTrue(outcome.cookieHeader.orEmpty().contains("sessionid"))
+        } finally {
+            server.stop(0)
+        }
+    }
+
 }

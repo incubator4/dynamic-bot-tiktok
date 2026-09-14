@@ -112,7 +112,10 @@ internal class TiktokPublisherRuntime() :
         }
     }
 
-    override val supportedLoginMethods: Set<PublisherLoginMethod> = setOf(PublisherLoginMethod.COOKIE)
+    override val supportedLoginMethods: Set<PublisherLoginMethod> = setOf(
+        PublisherLoginMethod.COOKIE,
+        PublisherLoginMethod.QR_CODE,
+    )
     override val supportsCookieExport: Boolean = true
 
     override suspend fun onLoad(context: PluginContext) {
@@ -284,9 +287,53 @@ internal class TiktokPublisherRuntime() :
         onQrCode: suspend (PublisherQrLoginChallenge) -> Unit,
         onStatusChanged: suspend (PublisherLoginResult) -> Unit,
     ): PublisherLoginResult {
+        if (!::gateway.isInitialized) {
+            return PublisherLoginResult(
+                status = PublisherLoginStatus.FAILED,
+                message = "抖音插件尚未加载，无法扫码登录",
+            )
+        }
+        val outcome = try {
+            gateway.loginByQrCode(onQrCode, onStatusChanged)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            return PublisherLoginResult(
+                status = PublisherLoginStatus.FAILED,
+                message = error.message ?: "抖音扫码登录失败",
+            )
+        }
+        val result = outcome.result
+        if (result.status != PublisherLoginStatus.SUCCESS) {
+            return result
+        }
+        val cookieHeader = outcome.cookieHeader?.trim().orEmpty()
+        if (cookieHeader.isBlank()) {
+            return PublisherLoginResult(
+                status = PublisherLoginStatus.FAILED,
+                message = "扫码登录成功但未返回 Cookie",
+            )
+        }
+        val previous = currentConfig()
+        val next = previous.copy(cookie = cookieHeader)
+        config = next
+        gateway = gatewayFactory(next)
+        val verified = checkLoginState()
+        if (verified.status == PublisherLoginStatus.SUCCESS) {
+            requestFailureHandler.recordSuccess("二维码登录")
+            if (!persistRuntimeCookieIfChanged()) {
+                saveConfig(pluginId, config)
+            }
+            if (config.pollingEnabled && ::taskScheduler.isInitialized && ::detectTask.isInitialized) {
+                bootstrapLoggedInState()
+            }
+            return verified
+        }
+        config = previous
+        gateway = gatewayFactory(previous)
         return PublisherLoginResult(
-            status = PublisherLoginStatus.UNSUPPORTED,
-            message = "一期不支持抖音二维码登录，请使用 Cookie 登录",
+            status = PublisherLoginStatus.FAILED,
+            message = verified.message.ifBlank { "扫码登录后账号状态校验失败" },
         )
     }
 

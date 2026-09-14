@@ -14,7 +14,7 @@
 - Status: Accepted
 - Date: 2026-09-13
 
-一期以 [dynamic-bot-weibo](https://github.com/Colter23/dynamic-bot-weibo) 为模板：`Plugin` 薄入口 + `Runtime` 编排 + `Gateway` + `Mapper` + `CursorStore` + `RequestFailureHandler`。Bilibili 的搜索、二维码、直播、批量关注留到后续 ADR。
+一期以 [dynamic-bot-weibo](https://github.com/Colter23/dynamic-bot-weibo) 为模板：`Plugin` 薄入口 + `Runtime` 编排 + `Gateway` + `Mapper` + `CursorStore` + `RequestFailureHandler`。Bilibili 的搜索、批量关注留到后续 ADR；直播见 ADR-0009，扫码登录对齐 Bilibili 交互但走抖音 SSO（ADR-0010）。
 
 产品文档、Gradle 骨架和 Cursor 规则对齐 [dynamic-bot-rednote](https://github.com/incubator4/dynamic-bot-rednote)。
 
@@ -41,7 +41,7 @@ Kotlin 包名必须跟随 Gradle `group`，见 ADR-0008。
 - Status: Accepted
 - Date: 2026-09-13
 
-`PublisherLoginProvider` 一期只保证 Cookie 登录、登录态检查、登录失效暂停轮询。二维码登录、Cookie 自动刷新、导出 Cookie 都不是 MVP。
+`PublisherLoginProvider` 一期保证 Cookie 登录、登录态检查、登录失效暂停轮询。二维码登录见 [ADR-0010](#adr-0010-抖音扫码登录)。Cookie 自动刷新仍不是 MVP。
 
 Cookie 只存在用户本机的 `config/`，不进 git，不写进文档示例的真实值。
 
@@ -64,7 +64,7 @@ Cookie 只存在用户本机的 `config/`，不进 git，不写进文档示例�
 - Status: Accepted
 - Date: 2026-09-13
 
-In：Cookie 登录、用户 ID 查资料、作品轮询、`DynamicPayload` 映射、游标、风控暂停、配置表单；宜做链接解析。
+In：Cookie / 扫码登录、用户 ID 查资料、作品轮询、`DynamicPayload` 映射、游标、风控暂停、配置表单；宜做链接解析。直播见 ADR-0009。
 
 Out：用户名搜索、自动关注、视频无水印下载、国际版 TikTok、插件独立后台页、出口协议、第二套推送通道。
 
@@ -123,3 +123,4 @@ Out：用户名搜索、自动关注、视频无水印下载、国际版 TikTok�
 | 配置 | `liveDetectionEnabled` 默认开启；仍受 `pollingEnabled` 与 ≥60s / ≥1s 间隔约束 |
 
 不做：直播流下载、弹幕、回放、按直播间 ID 搜索、扫全站正在直播列表、绕过平台校验的签名实现。
+

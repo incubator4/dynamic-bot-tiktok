@@ -2,9 +2,11 @@ package com.incubator4.dynamic.tiktok
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
+import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
 import top.colter.dynamic.core.tools.loggerFor
 import java.net.CookieManager
 import java.net.CookiePolicy
@@ -26,6 +28,29 @@ internal class TiktokClient(
     private val userProfileUriBuilder: (String) -> URI = { userId ->
         URI.create("$TIKTOK_HOME/user/${URLEncoder.encode(userId, StandardCharsets.UTF_8)}")
     },
+    private val homeUri: URI = URI.create("$TIKTOK_HOME/"),
+    private val qrCreateUri: URI = URI.create(TIKTOK_QR_CREATE_URL),
+    private val qrCheckUriBuilder: (String, String) -> URI = { token, verifyFp ->
+        URI.create(
+            buildString {
+                append(TIKTOK_QR_CHECK_URL)
+                append("?service=")
+                append(URLEncoder.encode(TIKTOK_QR_SERVICE, StandardCharsets.UTF_8))
+                append("&need_logo=false&need_short_url=false")
+                append("&aid=")
+                append(TIKTOK_QR_AID)
+                append("&account_sdk_source=sso&sdk_version=2.2.7&language=zh")
+                append("&verifyFp=")
+                append(URLEncoder.encode(verifyFp, StandardCharsets.UTF_8))
+                append("&fp=")
+                append(URLEncoder.encode(verifyFp, StandardCharsets.UTF_8))
+                append("&token=")
+                append(URLEncoder.encode(token, StandardCharsets.UTF_8))
+            },
+        )
+    },
+    private val qrPollIntervalMs: Long = TIKTOK_QR_POLL_INTERVAL_MS,
+    private val qrTimeoutMs: Long = TIKTOK_QR_TIMEOUT_MS,
 ) {
     suspend fun checkLoginState(): PublisherLoginResult {
         val cookies = parseTiktokCookieInput(currentCookieHeader())
@@ -80,6 +105,114 @@ internal class TiktokClient(
     }
 
     fun exportCookieHeader(): String = currentCookieHeader()
+
+
+    suspend fun loginByQrCode(
+        onQrCode: suspend (PublisherQrLoginChallenge) -> Unit,
+        onStatusChanged: suspend (PublisherLoginResult) -> Unit,
+    ): TiktokQrLoginOutcome {
+        val cookieManager = CookieManager(null, CookiePolicy.ACCEPT_ALL)
+        val qrClient = HttpClient.newBuilder()
+            .cookieHandler(cookieManager)
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .connectTimeout(Duration.ofSeconds(10))
+            .build()
+
+        try {
+            warmUpQrSession(qrClient)
+            val session = createQrSession(qrClient)
+            onQrCode(session.toChallenge())
+            onStatusChanged(
+                PublisherLoginResult(
+                    status = PublisherLoginStatus.PENDING,
+                    message = "请使用抖音 App 扫描二维码",
+                ),
+            )
+
+            val deadline = System.currentTimeMillis() + qrTimeoutMs
+            var lastStatus: TiktokQrCheckStatus? = null
+            while (System.currentTimeMillis() < deadline) {
+                val check = checkQrSession(qrClient, session)
+                if (check.status != lastStatus) {
+                    lastStatus = check.status
+                    when (check.status) {
+                        TiktokQrCheckStatus.WAITING -> {
+                            onStatusChanged(
+                                PublisherLoginResult(PublisherLoginStatus.PENDING, check.message),
+                            )
+                        }
+                        TiktokQrCheckStatus.SCANNED -> {
+                            onStatusChanged(
+                                PublisherLoginResult(PublisherLoginStatus.PENDING, check.message),
+                            )
+                        }
+                        TiktokQrCheckStatus.EXPIRED -> {
+                            return TiktokQrLoginOutcome(
+                                result = PublisherLoginResult(PublisherLoginStatus.EXPIRED, check.message),
+                            )
+                        }
+                        TiktokQrCheckStatus.ERROR -> {
+                            return TiktokQrLoginOutcome(
+                                result = PublisherLoginResult(PublisherLoginStatus.FAILED, check.message),
+                            )
+                        }
+                        TiktokQrCheckStatus.CONFIRMED -> {
+                            finalizeQrLogin(qrClient, check.redirectUrl)
+                            val cookieHeader = cookieManager.toCookieHeader()
+                            val cookies = parseTiktokCookieInput(cookieHeader)
+                            if (!cookies.hasLoginSession()) {
+                                return TiktokQrLoginOutcome(
+                                    result = PublisherLoginResult(
+                                        status = PublisherLoginStatus.FAILED,
+                                        message = "扫码已确认，但未拿到包含 sessionid 的登录 Cookie，请重试或改用 Cookie 登录",
+                                    ),
+                                )
+                            }
+                            val verified = TiktokClient(
+                                config = config.copy(cookie = cookies.header),
+                                httpClient = defaultHttpClient(cookies.header),
+                                accountInfoUri = accountInfoUri,
+                            ).checkLoginState()
+                            return if (verified.status == PublisherLoginStatus.SUCCESS) {
+                                TiktokQrLoginOutcome(result = verified, cookieHeader = cookies.header)
+                            } else {
+                                TiktokQrLoginOutcome(
+                                    result = PublisherLoginResult(
+                                        status = PublisherLoginStatus.FAILED,
+                                        message = verified.message.ifBlank { "扫码登录后账号状态校验失败" },
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+                delay(qrPollIntervalMs)
+            }
+            return TiktokQrLoginOutcome(
+                result = PublisherLoginResult(
+                    status = PublisherLoginStatus.EXPIRED,
+                    message = "抖音扫码登录超时，请重新获取二维码",
+                ),
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: TiktokBlockedException) {
+            return TiktokQrLoginOutcome(
+                result = PublisherLoginResult(
+                    status = PublisherLoginStatus.FAILED,
+                    message = error.message ?: "抖音扫码登录疑似被风控",
+                ),
+            )
+        } catch (error: Throwable) {
+            return TiktokQrLoginOutcome(
+                result = PublisherLoginResult(
+                    status = PublisherLoginStatus.FAILED,
+                    message = error.message ?: "抖音扫码登录失败",
+                ),
+            )
+        }
+    }
+
 
     internal fun parseLiveResponse(statusCode: Int, body: String, userId: String): TiktokLiveSnapshot {
         if (statusCode == 401) {
@@ -185,6 +318,118 @@ internal class TiktokClient(
             .joinToString("; ") { cookie -> "${cookie.name}=${cookie.value}" }
     }
 
+
+    private suspend fun warmUpQrSession(client: HttpClient) {
+        runCatching {
+            sendWithClient(
+                client,
+                HttpRequest.newBuilder(homeUri)
+                    .timeout(Duration.ofSeconds(15))
+                    .GET()
+                    .applyCommonHeaders("")
+                    .build(),
+            )
+        }
+    }
+
+    private suspend fun createQrSession(client: HttpClient): TiktokQrCodeSession {
+        val verifyFp = generateTiktokVerifyFp()
+        val separator = if (qrCreateUri.query == null) "?" else "&"
+        val createUri = URI.create(
+            buildString {
+                append(qrCreateUri)
+                append(separator)
+                append("service=")
+                append(URLEncoder.encode(TIKTOK_QR_SERVICE, StandardCharsets.UTF_8))
+                append("&need_logo=false&need_short_url=false")
+                append("&aid=")
+                append(TIKTOK_QR_AID)
+                append("&account_sdk_source=sso&sdk_version=2.2.7&language=zh")
+                append("&verifyFp=")
+                append(URLEncoder.encode(verifyFp, StandardCharsets.UTF_8))
+                append("&fp=")
+                append(URLEncoder.encode(verifyFp, StandardCharsets.UTF_8))
+            },
+        )
+        val response = sendWithClient(
+            client,
+            HttpRequest.newBuilder(createUri)
+                .timeout(Duration.ofSeconds(15))
+                .GET()
+                .applyCommonHeaders("")
+                .build(),
+        )
+        if (looksLikeRiskControl(code = null, message = "", httpStatus = response.statusCode())) {
+            throw TiktokBlockedException("抖音二维码创建疑似被风控（HTTP ${response.statusCode()}）")
+        }
+        if (response.statusCode() !in 200..299) {
+            throw TiktokLoginException("抖音二维码创建失败：HTTP ${response.statusCode()}")
+        }
+        val session = parseTiktokQrCodeCreate(response.body())
+        return session.copy(verifyFp = session.verifyFp.ifBlank { verifyFp })
+    }
+
+    private suspend fun checkQrSession(
+        client: HttpClient,
+        session: TiktokQrCodeSession,
+    ): TiktokQrCheckResult {
+        val response = sendWithClient(
+            client,
+            HttpRequest.newBuilder(qrCheckUriBuilder(session.token, session.verifyFp))
+                .timeout(Duration.ofSeconds(15))
+                .GET()
+                .applyCommonHeaders("")
+                .build(),
+        )
+        if (looksLikeRiskControl(code = null, message = "", httpStatus = response.statusCode())) {
+            return TiktokQrCheckResult(
+                status = TiktokQrCheckStatus.ERROR,
+                message = "抖音二维码状态检查疑似被风控（HTTP ${response.statusCode()}）",
+            )
+        }
+        if (response.statusCode() !in 200..299) {
+            return TiktokQrCheckResult(
+                status = TiktokQrCheckStatus.ERROR,
+                message = "抖音二维码状态检查失败：HTTP ${response.statusCode()}",
+            )
+        }
+        return parseTiktokQrCodeCheck(response.body())
+    }
+
+    private suspend fun finalizeQrLogin(client: HttpClient, redirectUrl: String?) {
+        if (!redirectUrl.isNullOrBlank()) {
+            runCatching {
+                sendWithClient(
+                    client,
+                    HttpRequest.newBuilder(URI.create(redirectUrl))
+                        .timeout(Duration.ofSeconds(20))
+                        .GET()
+                        .applyCommonHeaders("")
+                        .build(),
+                )
+            }
+        }
+        runCatching {
+            sendWithClient(
+                client,
+                HttpRequest.newBuilder(homeUri)
+                    .timeout(Duration.ofSeconds(15))
+                    .GET()
+                    .applyCommonHeaders("")
+                    .build(),
+            )
+        }
+    }
+
+    private suspend fun sendWithClient(
+        client: HttpClient,
+        request: HttpRequest,
+    ): HttpResponse<String> {
+        return withContext(Dispatchers.IO) {
+            client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+        }
+    }
+
     companion object {
         internal fun defaultHttpClient(cookie: String): HttpClient {
             val cookieManager = CookieManager(null, CookiePolicy.ACCEPT_ALL)
@@ -220,6 +465,15 @@ private fun HttpRequest.Builder.applyCommonHeaders(
         header("x-tt-passport-csrf-token", csrf)
     }
     return this
+}
+
+
+private fun CookieManager.toCookieHeader(): String {
+    return cookieStore.cookies
+        .asSequence()
+        .filterNot { it.hasExpired() }
+        .filter { it.name.isNotBlank() }
+        .joinToString("; ") { cookie -> "${cookie.name}=${cookie.value}" }
 }
 
 private const val DESKTOP_USER_AGENT: String =
