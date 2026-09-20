@@ -74,6 +74,20 @@ class TiktokAuthTest {
     }
 
     @Test
+    fun `account info missing user is treated as cookie login failure`() {
+        assertTrue(TIKTOK_ACCOUNT_INFO_URL.contains("aid=$TIKTOK_WEB_AID"))
+        assertTrue(TIKTOK_ACCOUNT_INFO_URL.contains("account_sdk_source=web"))
+
+        val missing = parseTiktokAccountInfo(
+            """{"message":"error","data":{"error_code":1041,"description":"用户不存在"}}""",
+        ).toLoginResult()
+        assertEquals(PublisherLoginStatus.FAILED, missing.status)
+        assertTrue(missing.message.contains("Cookie"))
+        assertTrue(missing.message.contains("sessionid"))
+        assertNull(missing.account)
+    }
+
+    @Test
     fun `invalid cookie json fails with chinese message`() {
         val error = assertFailsWith<TiktokLoginException> {
             parseTiktokCookieInput("[not-json")

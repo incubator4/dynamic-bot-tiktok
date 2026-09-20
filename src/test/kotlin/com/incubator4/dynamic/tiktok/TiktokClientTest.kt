@@ -19,10 +19,14 @@ class TiktokClientTest {
         val server = HttpServer.create(InetSocketAddress(0), 0)
         server.createContext("/passport/web/account/info/") { exchange ->
             val cookie = exchange.requestHeaders.getFirst("Cookie").orEmpty()
-            val body = if (cookie.contains("sessionid=valid")) {
-                """{"message":"success","data":{"user_id_str":"u1","screen_name":"登录用户"}}"""
-            } else {
-                """{"message":"success","data":{}}"""
+            val query = exchange.requestURI.query.orEmpty()
+            val body = when {
+                !query.contains("aid=6383") ->
+                    """{"message":"error","data":{"error_code":1041,"description":"用户不存在"}}"""
+                cookie.contains("sessionid=valid") ->
+                    """{"message":"success","data":{"user_id_str":"u1","screen_name":"登录用户"}}"""
+                else ->
+                    """{"message":"success","data":{}}"""
             }
             val bytes = body.toByteArray()
             exchange.sendResponseHeaders(200, bytes.size.toLong())
@@ -30,7 +34,9 @@ class TiktokClientTest {
         }
         server.start()
         try {
-            val uri = URI.create("http://127.0.0.1:${server.address.port}/passport/web/account/info/")
+            val uri = URI.create(
+                "http://127.0.0.1:${server.address.port}/passport/web/account/info/?aid=6383&account_sdk_source=web",
+            )
             val httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(2))
                 .build()
@@ -49,6 +55,17 @@ class TiktokClientTest {
             ).checkLoginState()
             assertEquals(PublisherLoginStatus.FAILED, guest.status)
             assertTrue(guest.message.contains("未登录") || guest.message.contains("失效"))
+
+            val missingAid = TiktokClient(
+                config = TiktokPublisherConfig(cookie = "sessionid=valid; ttwid=token"),
+                httpClient = httpClient,
+                accountInfoUri = URI.create(
+                    "http://127.0.0.1:${server.address.port}/passport/web/account/info/",
+                ),
+            ).checkLoginState()
+            assertEquals(PublisherLoginStatus.FAILED, missingAid.status)
+            assertTrue(missingAid.message.contains("Cookie"))
+            assertTrue(missingAid.message.contains("sessionid"))
         } finally {
             server.stop(0)
         }

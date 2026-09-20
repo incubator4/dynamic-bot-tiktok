@@ -16,7 +16,9 @@ import java.util.LinkedHashMap
 internal const val TIKTOK_PLATFORM_ID: String = "tiktok"
 internal const val TIKTOK_HOME: String = "https://www.douyin.com"
 internal const val TIKTOK_LIVE_HOME: String = "https://live.douyin.com"
-internal const val TIKTOK_ACCOUNT_INFO_URL: String = "https://www.douyin.com/passport/web/account/info/"
+internal const val TIKTOK_WEB_AID: String = "6383"
+internal const val TIKTOK_ACCOUNT_INFO_URL: String =
+    "https://www.douyin.com/passport/web/account/info/?aid=$TIKTOK_WEB_AID&account_sdk_source=web"
 internal const val TIKTOK_DEFAULT_AVATAR: String = "https://www.douyin.com/favicon.ico"
 
 internal open class TiktokApiException(
@@ -121,6 +123,12 @@ internal fun TiktokAccountSnapshot.toLoginResult(): PublisherLoginResult {
             message = detail.ifBlank { "抖音请求疑似被风控，已停止继续尝试。请稍后再试或更新 Cookie。" },
         )
     }
+    if (looksLikeMissingAccount(code, detail)) {
+        return PublisherLoginResult(
+            status = PublisherLoginStatus.FAILED,
+            message = "抖音 Cookie 未登录或已失效，请重新登录后导入包含 sessionid 的完整 Cookie",
+        )
+    }
     if (isApiFailure()) {
         return PublisherLoginResult(
             status = PublisherLoginStatus.FAILED,
@@ -155,6 +163,14 @@ internal fun looksLikeRiskControl(code: Long?, message: String, httpStatus: Int?
         value.contains("captcha") ||
         value.contains("verify") ||
         value.contains("risk")
+}
+
+internal fun looksLikeMissingAccount(code: Long?, message: String): Boolean {
+    if (code == 1041L) return true
+    val value = message.lowercase()
+    return value.contains("用户不存在") ||
+        value.contains("user not exist") ||
+        value.contains("user does not exist")
 }
 
 internal fun looksLikeLoginFailure(message: String): Boolean {
