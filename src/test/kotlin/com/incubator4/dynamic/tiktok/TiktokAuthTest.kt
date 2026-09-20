@@ -71,6 +71,8 @@ class TiktokAuthTest {
         assertTrue(blocked.message.contains("风控"))
         assertTrue(looksLikeRiskControl(461, "请求被风控拦截", httpStatus = 200))
         assertTrue(looksLikeRiskControl(null, "", httpStatus = 403))
+        assertTrue(looksLikeRiskControl(4031, "您正在尝试访问的网站存在安全风险"))
+        assertTrue(looksLikeHtml("<!doctype html><html><head><script></script></head></html>"))
     }
 
     @Test
@@ -206,6 +208,23 @@ class TiktokPublisherConfigFormTest {
         )
         assertEquals(TiktokQrCheckStatus.ERROR, blocked.status)
         assertTrue(blocked.message.contains("风控"))
+
+        val htmlCreate = assertFailsWith<TiktokBlockedException> {
+            parseTiktokQrCodeCreate("<!doctype html><html><head><script></script></head></html>")
+        }
+        assertTrue(htmlCreate.message!!.contains("风控") || htmlCreate.message!!.contains("网页"))
+
+        val riskCreate = assertFailsWith<TiktokBlockedException> {
+            parseTiktokQrCodeCreate(
+                """{"data":{"captcha":"","description":"您正在尝试访问的网站存在安全风险","error_code":4031},"message":"error"}""",
+            )
+        }
+        assertTrue(riskCreate.message!!.contains("安全风险"))
+
+        val frontendQr = parseTiktokQrCodeCreate(
+            """{"error_code":0,"data":{"token":"tok-front","frontend_show_qrcode":"https://example.com/front-qr"}}""",
+        )
+        assertEquals("https://example.com/front-qr", frontendQr.qrContent)
     }
 
     @Test

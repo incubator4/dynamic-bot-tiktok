@@ -275,6 +275,34 @@ class TiktokClientTest {
         }
     }
 
+    @Test
+    fun `loginByQrCode treats html create response as risk control`() = runBlocking {
+        val server = HttpServer.create(InetSocketAddress(0), 0)
+        server.createContext("/") { exchange ->
+            exchange.sendResponseHeaders(200, 0)
+            exchange.responseBody.close()
+        }
+        server.createContext("/get_qrcode/") { exchange ->
+            val body = "<!doctype html><html><head><script></script></head><body>login</body></html>"
+            val bytes = body.toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        try {
+            val base = "http://127.0.0.1:${server.address.port}"
+            val outcome = qrClient(base).loginByQrCode(onQrCode = {}, onStatusChanged = {})
+            assertEquals(PublisherLoginStatus.FAILED, outcome.result.status)
+            assertTrue(
+                outcome.result.message.contains("风控") ||
+                    outcome.result.message.contains("网页") ||
+                    outcome.result.message.contains("Cookie"),
+            )
+        } finally {
+            server.stop(0)
+        }
+    }
+
     private fun qrClient(
         base: String,
         pollIntervalMs: Long = 10,
@@ -288,6 +316,7 @@ class TiktokClientTest {
             ssoHomeUri = URI.create("$base/"),
             qrCreateUri = URI.create("$base/get_qrcode/"),
             qrCheckUriBuilder = { token, _ -> URI.create("$base/check_qrconnect/?token=$token") },
+            ttwidRegisterUri = null,
             qrPollIntervalMs = pollIntervalMs,
             qrTimeoutMs = timeoutMs,
         )

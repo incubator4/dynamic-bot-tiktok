@@ -4,15 +4,21 @@ import kotlinx.serialization.json.JsonObject
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.util.Base64
 import java.util.UUID
 import kotlin.random.Random
 
 internal const val TIKTOK_SSO_HOME: String = "https://sso.douyin.com"
-internal const val TIKTOK_QR_CREATE_URL: String = "$TIKTOK_SSO_HOME/get_qrcode/"
-internal const val TIKTOK_QR_CHECK_URL: String = "$TIKTOK_SSO_HOME/check_qrconnect/"
+internal const val TIKTOK_QR_CREATE_URL: String = "$TIKTOK_HOME/passport/web/get_qrcode/"
+internal const val TIKTOK_QR_CHECK_URL: String = "$TIKTOK_HOME/passport/web/check_qrconnect/"
+internal const val TIKTOK_TTWID_REGISTER_URL: String = "https://ttwid.bytedance.com/ttwid/union/register/"
+internal const val TIKTOK_TTWID_REGISTER_BODY: String =
+    """{"region":"cn","aid":6383,"needFid":false,"service":"www.douyin.com","migrate_info":{"ticket":"","source":"node"},"cbUrlProtocol":"https","union":true}"""
 internal const val TIKTOK_QR_SERVICE: String = TIKTOK_HOME
 internal const val TIKTOK_QR_AID: String = TIKTOK_WEB_AID
+internal const val TIKTOK_QR_PASSPORT_JSSDK_VERSION: String = "1.0.20"
 internal const val TIKTOK_QR_POLL_INTERVAL_MS: Long = 2_000L
 internal const val TIKTOK_QR_TIMEOUT_MS: Long = 180_000L
 internal const val TIKTOK_QR_EXPIRE_SECONDS: Long = 180L
@@ -51,8 +57,32 @@ internal fun generateTiktokVerifyFp(): String {
     return "verify_${suffix}_$noise"
 }
 
+internal fun tiktokQrQueryString(verifyFp: String, token: String? = null): String {
+    val utf8 = StandardCharsets.UTF_8
+    return buildString {
+        append("service=")
+        append(URLEncoder.encode(TIKTOK_QR_SERVICE, utf8))
+        append("&next=")
+        append(URLEncoder.encode(TIKTOK_QR_SERVICE, utf8))
+        append("&need_logo=false&need_short_url=false")
+        append("&passport_jssdk_version=")
+        append(TIKTOK_QR_PASSPORT_JSSDK_VERSION)
+        append("&aid=")
+        append(TIKTOK_QR_AID)
+        append("&account_sdk_source=sso&sdk_version=2.2.7&language=zh")
+        append("&verifyFp=")
+        append(URLEncoder.encode(verifyFp, utf8))
+        append("&fp=")
+        append(URLEncoder.encode(verifyFp, utf8))
+        if (!token.isNullOrBlank()) {
+            append("&token=")
+            append(URLEncoder.encode(token, utf8))
+        }
+    }
+}
+
 internal fun parseTiktokQrCodeCreate(json: String): TiktokQrCodeSession {
-    val root = parseJsonObject(json, "抖音二维码创建响应不是有效 JSON")
+    val root = parseTiktokQrJson(json, "抖音二维码创建")
     val data = root.obj("data") ?: JsonObject(emptyMap())
     val errorCode = root.long("error_code", "status_code", "code")
         ?: data.long("error_code", "status_code", "code")
@@ -74,8 +104,8 @@ internal fun parseTiktokQrCodeCreate(json: String): TiktokQrCodeSession {
     val token = firstNonBlank(data.string("token"), root.string("token"))
         ?: throw TiktokLoginException("抖音二维码创建响应缺少 token")
     val qrContent = firstNonBlank(
-        data.string("qrcode_index_url", "qrcode_url", "url"),
-        root.string("qrcode_index_url", "qrcode_url", "url"),
+        data.string("qrcode_index_url", "qrcode_url", "frontend_show_qrcode", "url"),
+        root.string("qrcode_index_url", "qrcode_url", "frontend_show_qrcode", "url"),
     )
     val qrImageBytes = decodeTiktokQrImage(
         firstNonBlank(
@@ -100,7 +130,7 @@ internal fun parseTiktokQrCodeCreate(json: String): TiktokQrCodeSession {
 }
 
 internal fun parseTiktokQrCodeCheck(json: String): TiktokQrCheckResult {
-    val root = parseJsonObject(json, "抖音二维码状态响应不是有效 JSON")
+    val root = parseTiktokQrJson(json, "抖音二维码状态")
     val data = root.obj("data") ?: JsonObject(emptyMap())
     val errorCode = root.long("error_code", "status_code", "code")
         ?: data.long("error_code", "status_code", "code")
@@ -187,6 +217,19 @@ internal fun TiktokQrCodeSession.toChallenge(): PublisherQrLoginChallenge {
         validityHint = "约三分钟内有效",
         statusPollIntervalMillis = TIKTOK_QR_POLL_INTERVAL_MS,
     )
+}
+
+private fun parseTiktokQrJson(body: String, action: String): JsonObject {
+    val trimmed = body.trim()
+    if (trimmed.isEmpty()) {
+        throw TiktokLoginException("${action}响应为空")
+    }
+    if (looksLikeHtml(trimmed)) {
+        throw TiktokBlockedException(
+            "${action}疑似被风控（返回了网页而不是数据），请稍后再试或改用 Cookie 登录",
+        )
+    }
+    return parseJsonObject(trimmed, "${action}响应不是有效 JSON")
 }
 
 private fun decodeTiktokQrImage(raw: String?): ByteArray? {

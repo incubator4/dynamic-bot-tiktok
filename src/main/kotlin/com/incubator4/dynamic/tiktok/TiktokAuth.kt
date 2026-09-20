@@ -161,12 +161,14 @@ internal fun TiktokAccountSnapshot.toLoginResult(): PublisherLoginResult {
 
 internal fun looksLikeRiskControl(code: Long?, message: String, httpStatus: Int? = null): Boolean {
     if (httpStatus == 403 || httpStatus == 461 || httpStatus == 471) return true
-    if (code == 461L || code == 471L) return true
+    if (code == 461L || code == 471L || code == 4031L || code == 2156L) return true
     val value = message.lowercase()
     return value.contains("风控") ||
         value.contains("验证码") ||
         value.contains("人机验证") ||
         value.contains("拦截") ||
+        value.contains("安全风险") ||
+        value.contains("系统繁忙") ||
         value.contains("captcha") ||
         value.contains("verify") ||
         value.contains("risk")
@@ -186,6 +188,14 @@ internal fun looksLikeMissingAccount(code: Long?, message: String): Boolean {
     return value.contains("用户不存在") ||
         value.contains("user not exist") ||
         value.contains("user does not exist")
+}
+
+internal fun looksLikeHtml(body: String): Boolean {
+    val value = body.trim().lowercase()
+    return value.startsWith("<!doctype html") ||
+        value.startsWith("<html") ||
+        value.contains("<title>") ||
+        value.contains("<script")
 }
 
 internal fun looksLikeLoginFailure(message: String): Boolean {
