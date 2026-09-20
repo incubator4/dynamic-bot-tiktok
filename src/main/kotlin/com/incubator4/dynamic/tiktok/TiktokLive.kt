@@ -112,14 +112,50 @@ internal fun parseTiktokLiveSnapshot(json: String, fallbackUserId: String): Tikt
     )
 }
 
+internal data class TiktokHtmlMeta(
+    val title: String? = null,
+    val description: String? = null,
+    val coverUrl: String? = null,
+    val authorName: String? = null,
+)
+
 internal fun extractTiktokEmbeddedPayload(body: String): String {
     val trimmed = body.trim()
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) return trimmed
     extractScriptJson(trimmed, "RENDER_DATA")?.let { return it }
+    extractScriptJson(trimmed, "__UNIVERSAL_DATA_FOR_REHYDRATION__")?.let { return it }
     extractScriptJson(trimmed, "__NEXT_DATA__")?.let { return it }
     extractAssignmentJson(trimmed, "_ROUTER_DATA")?.let { return it }
     extractAssignmentJson(trimmed, "RENDER_DATA")?.let { return it }
-    throw TiktokApiException("抖音用户主页没有返回可用的资料数据")
+    throw TiktokApiException("抖音页面没有返回可用的资料数据")
+}
+
+internal fun extractTiktokHtmlMeta(body: String): TiktokHtmlMeta {
+    val html = body.trim()
+    if (html.isEmpty()) return TiktokHtmlMeta()
+    return TiktokHtmlMeta(
+        title = firstNonBlank(
+            html.metaContent("og:title"),
+            html.metaContent("twitter:title"),
+            html.htmlTitle(),
+        ),
+        description = firstNonBlank(
+            html.metaContent("og:description"),
+            html.metaContent("description"),
+            html.metaContent("twitter:description"),
+        ),
+        coverUrl = firstHttpUrl(
+            html.metaContent("og:image"),
+            html.metaContent("og:image:url"),
+            html.metaContent("twitter:image"),
+            html.metaContent("twitter:image:src"),
+        ),
+        authorName = firstNonBlank(
+            html.metaContent("author"),
+            html.metaContent("og:video:actor"),
+            html.metaContent("article:author"),
+        ),
+    )
 }
 
 internal fun userProfileLink(userId: String): String {
@@ -207,4 +243,32 @@ private fun decodeMaybeUrlEncodedJson(raw: String): String? {
         val value = candidate?.trim().orEmpty()
         value.startsWith("{") || value.startsWith("[")
     }?.trim()
+}
+
+private fun String.metaContent(name: String): String? {
+    val quotedName = Regex.escape(name)
+    val patterns = listOf(
+        Regex(
+            """<meta[^>]+(?:property|name|itemprop)=["']$quotedName["'][^>]+content=["']([^"']+)["']""",
+            RegexOption.IGNORE_CASE,
+        ),
+        Regex(
+            """<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name|itemprop)=["']$quotedName["']""",
+            RegexOption.IGNORE_CASE,
+        ),
+    )
+    return patterns.firstNotNullOfOrNull { pattern ->
+        pattern.find(this)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+    }
+}
+
+private fun String.htmlTitle(): String? {
+    val match = Regex(
+        """<title[^>]*>(.*?)</title>""",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    ).find(this) ?: return null
+    return match.groupValues.getOrNull(1)
+        ?.replace(Regex("""\s+"""), " ")
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
 }

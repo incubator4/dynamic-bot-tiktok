@@ -89,6 +89,25 @@ class TiktokLiveTest {
     }
 
     @Test
+    fun `extract html meta author and cover`() {
+        val meta = extractTiktokHtmlMeta(
+            """
+            <html>
+              <head>
+                <title>页标题</title>
+                <meta property="og:title" content="作品标题">
+                <meta property="og:image" content="//example.com/og.jpg">
+                <meta name="author" content="页面作者">
+              </head>
+            </html>
+            """.trimIndent(),
+        )
+        assertEquals("作品标题", meta.title)
+        assertEquals("页面作者", meta.authorName)
+        assertEquals("https://example.com/og.jpg", meta.coverUrl)
+    }
+
+    @Test
     fun `missing payload throws api exception`() {
         assertFailsWith<TiktokApiException> {
             extractTiktokEmbeddedPayload("<html><title>空白</title></html>")

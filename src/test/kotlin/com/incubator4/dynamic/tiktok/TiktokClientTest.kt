@@ -120,23 +120,90 @@ class TiktokClientTest {
     @Test
     fun `fetch aweme snapshot parses video page json`() = runBlocking {
         val server = HttpServer.create(InetSocketAddress(0), 0)
-        server.createContext("/video/") { exchange ->
-            val body = """{"aweme_id":"7123456789012345678","desc":"作品","author":{"sec_uid":"MS4w","nickname":"作者"}}"""
+        server.createContext("/share/") { exchange ->
+            val body = """
+                {
+                  "aweme_id":"7123456789012345678",
+                  "desc":"作品",
+                  "author":{"sec_uid":"MS4w","nickname":"作者","avatar_thumb":{"url_list":["https://example.com/a.png"]}},
+                  "video":{"cover":{"url_list":["https://example.com/c.jpg"]}}
+                }
+            """.trimIndent()
             val bytes = body.toByteArray()
             exchange.sendResponseHeaders(200, bytes.size.toLong())
             exchange.responseBody.use { it.write(bytes) }
         }
         server.start()
         try {
-            val base = URI.create("http://127.0.0.1:${server.address.port}/video/")
+            val shareBase = URI.create("http://127.0.0.1:${server.address.port}/share/")
             val snapshot = TiktokClient(
-                config = TiktokPublisherConfig(cookie = "sessionid=valid"),
+                config = TiktokPublisherConfig(cookie = "sessionid=valid", requestIntervalSeconds = 0.0),
                 httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(),
-                awemeUriBuilder = { awemeId, _ -> URI.create("${base}$awemeId") },
+                shareAwemeUriBuilder = { awemeId, _ -> URI.create("${shareBase}$awemeId") },
+                awemeUriBuilder = { _, _ -> URI.create("http://127.0.0.1:${server.address.port}/missing") },
             ).fetchAwemeSnapshot("7123456789012345678")
             assertEquals("7123456789012345678", snapshot?.awemeId)
             assertEquals("作品", snapshot?.description)
             assertEquals("MS4w", snapshot?.authorUserId)
+            assertEquals("作者", snapshot?.authorName)
+            assertEquals("https://example.com/c.jpg", snapshot?.coverUrl)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `parse aweme response fills author and cover from html meta`() {
+        val client = TiktokClient(TiktokPublisherConfig(cookie = "sessionid=valid"))
+        val html = """
+            <html>
+              <title>兜底标题</title>
+              <meta property="og:image" content="https://example.com/og.jpg">
+              <meta name="author" content="页面作者">
+              <meta property="og:title" content="作品标题">
+            </html>
+        """.trimIndent()
+        val snapshot = client.parseAwemeResponse(200, html, "7123456789012345678")
+        assertEquals("7123456789012345678", snapshot?.awemeId)
+        assertEquals("作品标题", snapshot?.description)
+        assertEquals("页面作者", snapshot?.authorName)
+        assertEquals("https://example.com/og.jpg", snapshot?.coverUrl)
+    }
+
+    @Test
+    fun `fetch aweme snapshot fills cover from desktop page when share page is incomplete`() = runBlocking {
+        val server = HttpServer.create(InetSocketAddress(0), 0)
+        server.createContext("/share/") { exchange ->
+            val body = """{"awemeId":"7123456789012345678","desc":"只有文案"}"""
+            val bytes = body.toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.createContext("/video/") { exchange ->
+            val body = """
+                {
+                  "awemeId":"7123456789012345678",
+                  "desc":"只有文案",
+                  "authorInfo":{"secUid":"MS4wFill","nickname":"补全作者"},
+                  "video":{"coverUrlList":["https://example.com/filled.jpg"]}
+                }
+            """.trimIndent()
+            val bytes = body.toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        try {
+            val port = server.address.port
+            val snapshot = TiktokClient(
+                config = TiktokPublisherConfig(cookie = "sessionid=valid", requestIntervalSeconds = 0.0),
+                httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(),
+                shareAwemeUriBuilder = { awemeId, _ -> URI.create("http://127.0.0.1:$port/share/$awemeId") },
+                awemeUriBuilder = { awemeId, _ -> URI.create("http://127.0.0.1:$port/video/$awemeId") },
+            ).fetchAwemeSnapshot("7123456789012345678")
+            assertEquals("MS4wFill", snapshot?.authorUserId)
+            assertEquals("补全作者", snapshot?.authorName)
+            assertEquals("https://example.com/filled.jpg", snapshot?.coverUrl)
         } finally {
             server.stop(0)
         }

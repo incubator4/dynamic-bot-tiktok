@@ -109,12 +109,20 @@ internal class TiktokLinkResolver(
     }
 
     private fun TiktokAwemeSnapshot.toPreview(): LinkPreview {
-        val publisher = authorUserId?.takeIf { it.isNotBlank() }?.let { userId ->
-            PublisherInfo(
+        val userId = authorUserId?.takeIf { it.isNotBlank() }
+        val displayName = authorName?.takeIf { it.isNotBlank() }
+        val publisher = when {
+            userId != null -> PublisherInfo(
                 key = PublisherKey.of(platformId.value, PublisherKind.USER, userId),
-                name = authorName?.takeIf { it.isNotBlank() } ?: "抖音用户 $userId",
+                name = displayName ?: "抖音用户 $userId",
                 avatar = MediaRef(authorAvatarUrl?.takeIf { it.isNotBlank() } ?: TIKTOK_DEFAULT_AVATAR, MediaKind.AVATAR),
             )
+            displayName != null -> PublisherInfo(
+                key = PublisherKey.of(platformId.value, PublisherKind.USER, displayName),
+                name = displayName,
+                avatar = MediaRef(authorAvatarUrl?.takeIf { it.isNotBlank() } ?: TIKTOK_DEFAULT_AVATAR, MediaKind.AVATAR),
+            )
+            else -> null
         }
         val title = description.takeIf { it.isNotBlank() }
             ?: if (isNote) "抖音图集 $awemeId" else "抖音视频 $awemeId"
@@ -126,7 +134,7 @@ internal class TiktokLinkResolver(
             title = title,
             description = description,
             badge = if (isNote) "图集" else "视频",
-            cover = coverUrl?.takeIf { it.isNotBlank() }?.let { MediaRef(it, MediaKind.COVER) },
+            cover = firstHttpUrl(coverUrl, authorAvatarUrl)?.let { MediaRef(it, MediaKind.COVER) },
             publisher = publisher,
             metrics = listOfNotNull(
                 playCount.toDisplayMetric("play"),

@@ -93,6 +93,8 @@ class TiktokLinkResolverTest {
         assertEquals("视频", resolution.preview.badge)
         assertEquals(15, resolution.preview.durationSeconds)
         assertEquals("MS4wLjABAAAAtest", resolution.preview.publisher?.externalId)
+        assertEquals("测试作者", resolution.preview.publisher?.name)
+        assertEquals("https://example.com/cover.jpg", resolution.preview.cover?.uri)
         assertEquals("1.2万", resolution.preview.metrics.first { it.key == "like" }.display)
     }
 
@@ -128,6 +130,8 @@ class TiktokLinkResolverTest {
         assertEquals("测试作者", resolution.preview.title)
         assertTrue(resolution.preview.description.contains("tester"))
         assertEquals(user.userId, resolution.preview.publisher?.externalId)
+        assertEquals("测试作者", resolution.preview.publisher?.name)
+        assertEquals("https://example.com/avatar.png", resolution.preview.cover?.uri)
     }
 
     @Test

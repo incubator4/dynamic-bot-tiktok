@@ -41,10 +41,10 @@ internal fun parseTiktokAwemeSnapshot(json: String, fallbackId: String): TiktokA
         }
     }
 
-    val aweme = findTiktokAwemeObject(root) ?: return null
+    val aweme = findTiktokAwemeObject(root, fallbackId) ?: return null
     val author = aweme.obj("author", "authorInfo")
     val video = aweme.obj("video")
-    val images = aweme.array("images", "image_list", "imageList")
+    val images = resolveAwemeImages(aweme)
     val statistics = aweme.obj("statistics", "stats")
     val awemeId = firstNonBlank(
         aweme.string("aweme_id", "awemeId", "id_str"),
@@ -52,13 +52,21 @@ internal fun parseTiktokAwemeSnapshot(json: String, fallbackId: String): TiktokA
         fallbackId,
     )?.takeIf { it != "0" } ?: return null
     val isNote = !images.isNullOrEmpty() ||
+        aweme.boolean("isSlides", "is_slides") == true ||
         aweme.long("aweme_type", "awemeType") in NOTE_AWEME_TYPES
     val coverUrl = firstHttpUrl(
-        video?.urlListFirst("origin_cover", "cover", "dynamic_cover", "cover_url"),
-        video?.string("cover", "cover_url"),
+        video?.mediaUrl(
+            "originCoverUrlList",
+            "coverUrlList",
+            "origin_cover",
+            "cover",
+            "dynamic_cover",
+            "cover_url",
+            "originCover",
+            "dynamicCover",
+        ),
         firstImageUrl(images),
-        aweme.urlListFirst("cover", "origin_cover"),
-        aweme.string("cover", "cover_url"),
+        aweme.mediaUrl("originCoverUrlList", "coverUrlList", "cover", "origin_cover", "cover_url"),
     )
     return TiktokAwemeSnapshot(
         awemeId = awemeId,
@@ -70,15 +78,26 @@ internal fun parseTiktokAwemeSnapshot(json: String, fallbackId: String): TiktokA
         ),
         authorUserId = firstNonBlank(
             author?.string("sec_uid", "secUid"),
-            author?.long("uid", "user_id")?.takeIf { it > 0L }?.toString(),
+            author?.long("uid", "user_id", "authorUserId")?.takeIf { it > 0L }?.toString(),
             author?.string("uid_str", "user_id_str", "uid", "user_id"),
+            aweme.string("sec_uid", "secUid"),
+            aweme.long("authorUserId", "author_user_id")?.takeIf { it > 0L }?.toString(),
+            aweme.string("authorUserId", "author_user_id"),
         ),
         authorName = firstNonBlank(
-            author?.string("nickname", "nickName", "screen_name", "unique_id"),
+            author?.string("nickname", "nickName", "screen_name", "unique_id", "uniqueId"),
+            aweme.string("authorName", "author_name"),
         ),
         authorAvatarUrl = firstHttpUrl(
-            author?.urlListFirst("avatar_larger", "avatar_medium", "avatar_thumb", "avatar"),
-            author?.string("avatar_url", "avatar"),
+            author?.mediaUrl(
+                "avatar_larger",
+                "avatar_medium",
+                "avatar_thumb",
+                "avatarThumb",
+                "avatar",
+                "avatarUri",
+                "avatar_url",
+            ),
         ),
         coverUrl = coverUrl,
         durationSeconds = parseAwemeDurationSeconds(
@@ -94,25 +113,74 @@ internal fun parseTiktokAwemeSnapshot(json: String, fallbackId: String): TiktokA
     )
 }
 
-internal fun findTiktokAwemeObject(root: JsonObject): JsonObject? {
-    listOfNotNull(
-        root.obj("aweme")?.obj("detail", "awemeDetail", "aweme_detail") ?: root.obj("aweme"),
-        root.obj("awemeDetail", "aweme_detail"),
-        root.obj("videoDetail", "video_detail")?.obj("awemeInfo", "aweme_info", "itemInfo", "aweme"),
-        root.obj("itemInfo", "item_info")?.obj("itemStruct", "item_struct", "aweme"),
-        firstArrayAweme(
-            root.array("item_list", "itemList", "aweme_list", "awemeList"),
-        ),
-        root.obj("data")?.let(::findTiktokAwemeObject),
-        root.obj("app")?.let(::findTiktokAwemeObject),
-    ).firstOrNull(::looksLikeTiktokAweme)?.let { return it }
-    return findFirstAwemeObject(root, depth = 0)
+internal fun findTiktokAwemeObject(root: JsonObject, preferredId: String? = null): JsonObject? {
+    val candidates = mutableListOf<JsonObject>()
+    collectAwemeObjects(root, depth = 0, into = candidates)
+    if (candidates.isEmpty()) return null
+    return candidates.maxBy { scoreTiktokAweme(it, preferredId) }
 }
 
-private fun firstArrayAweme(array: JsonArray?): JsonObject? {
-    array ?: return null
-    return array.firstNotNullOfOrNull { element ->
-        (element as? JsonObject)?.takeIf(::looksLikeTiktokAweme)
+internal fun TiktokAwemeSnapshot.hasPreviewIdentity(): Boolean {
+    return !coverUrl.isNullOrBlank() &&
+        (!authorUserId.isNullOrBlank() || !authorName.isNullOrBlank())
+}
+
+internal fun TiktokAwemeSnapshot.mergeMissingFrom(other: TiktokAwemeSnapshot?): TiktokAwemeSnapshot {
+    other ?: return this
+    return copy(
+        description = description.ifBlank { other.description },
+        createdAtEpochSeconds = createdAtEpochSeconds ?: other.createdAtEpochSeconds,
+        authorUserId = firstNonBlank(authorUserId, other.authorUserId),
+        authorName = firstNonBlank(authorName, other.authorName),
+        authorAvatarUrl = firstHttpUrl(authorAvatarUrl, other.authorAvatarUrl),
+        coverUrl = firstHttpUrl(coverUrl, other.coverUrl),
+        durationSeconds = durationSeconds ?: other.durationSeconds,
+        isNote = isNote || other.isNote,
+        likeCount = likeCount ?: other.likeCount,
+        commentCount = commentCount ?: other.commentCount,
+        shareCount = shareCount ?: other.shareCount,
+        collectCount = collectCount ?: other.collectCount,
+        playCount = playCount ?: other.playCount,
+    )
+}
+
+internal fun TiktokAwemeSnapshot.enrichWithHtmlMeta(
+    meta: TiktokHtmlMeta,
+    fallbackId: String,
+): TiktokAwemeSnapshot {
+    return copy(
+        awemeId = awemeId.ifBlank { fallbackId },
+        description = description.ifBlank { firstNonBlank(meta.title, meta.description).orEmpty() },
+        authorName = firstNonBlank(authorName, meta.authorName),
+        coverUrl = firstHttpUrl(coverUrl, meta.coverUrl),
+    )
+}
+
+internal fun TiktokHtmlMeta.toAwemeSnapshot(fallbackId: String): TiktokAwemeSnapshot? {
+    val id = fallbackId.trim().takeIf { it.isNotBlank() } ?: return null
+    if (firstNonBlank(title, description, authorName, coverUrl) == null) return null
+    return TiktokAwemeSnapshot(
+        awemeId = id,
+        description = firstNonBlank(title, description).orEmpty(),
+        authorName = authorName,
+        coverUrl = coverUrl,
+    )
+}
+
+private fun collectAwemeObjects(root: JsonObject, depth: Int, into: MutableList<JsonObject>) {
+    if (depth > 8) return
+    if (looksLikeTiktokAweme(root)) {
+        into += root
+    }
+    root.values.forEach { element ->
+        when (element) {
+            is JsonObject -> collectAwemeObjects(element, depth + 1, into)
+            is JsonArray -> element.forEach { child ->
+                val obj = child as? JsonObject ?: return@forEach
+                collectAwemeObjects(obj, depth + 1, into)
+            }
+            else -> Unit
+        }
     }
 }
 
@@ -124,24 +192,45 @@ private fun looksLikeTiktokAweme(obj: JsonObject): Boolean {
     if (id.isNullOrBlank() || id == "0") return false
     return obj.string("desc", "description", "caption") != null ||
         obj.obj("video") != null ||
-        obj.array("images", "image_list") != null ||
-        obj.obj("author") != null
+        obj.array("images", "image_list", "imageList") != null ||
+        obj.obj("author", "authorInfo") != null
 }
 
-private fun findFirstAwemeObject(root: JsonObject, depth: Int): JsonObject? {
-    if (depth > 8) return null
-    if (looksLikeTiktokAweme(root)) return root
-    root.values.forEach { element ->
-        when (element) {
-            is JsonObject -> findFirstAwemeObject(element, depth + 1)?.let { return it }
-            is JsonArray -> element.forEach { child ->
-                val obj = child as? JsonObject ?: return@forEach
-                findFirstAwemeObject(obj, depth + 1)?.let { return it }
-            }
-            else -> Unit
-        }
-    }
-    return null
+private fun scoreTiktokAweme(obj: JsonObject, preferredId: String?): Int {
+    val id = firstNonBlank(
+        obj.string("aweme_id", "awemeId", "id_str"),
+        obj.long("aweme_id", "id")?.takeIf { it > 0L }?.toString(),
+    )
+    var score = 0
+    if (!preferredId.isNullOrBlank() && id == preferredId) score += 8
+    if (obj.obj("author", "authorInfo") != null) score += 4
+    if (obj.obj("video") != null || obj.array("images", "image_list", "imageList") != null) score += 3
+    if (extractAwemeCoverUrl(obj) != null) score += 2
+    if (obj.string("desc", "description", "caption") != null) score += 1
+    return score
+}
+
+private fun extractAwemeCoverUrl(aweme: JsonObject): String? {
+    return firstHttpUrl(
+        aweme.obj("video")?.mediaUrl(
+            "originCoverUrlList",
+            "coverUrlList",
+            "origin_cover",
+            "cover",
+            "dynamic_cover",
+            "cover_url",
+            "originCover",
+            "dynamicCover",
+        ),
+        firstImageUrl(resolveAwemeImages(aweme)),
+        aweme.mediaUrl("originCoverUrlList", "coverUrlList", "cover", "origin_cover", "cover_url"),
+    )
+}
+
+private fun resolveAwemeImages(aweme: JsonObject): JsonArray? {
+    aweme.array("images", "image_list", "imageList")?.let { return it }
+    val encoded = aweme.string("imageInfos", "image_infos") ?: return null
+    return runCatching { TIKTOK_JSON.parseToJsonElement(encoded) as? JsonArray }.getOrNull()
 }
 
 private fun firstImageUrl(images: JsonArray?): String? {
