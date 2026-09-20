@@ -38,9 +38,10 @@ internal class TiktokClient(
     },
     private val homeUri: URI = URI.create("$TIKTOK_HOME/"),
     private val ssoHomeUri: URI = URI.create("$TIKTOK_SSO_HOME/"),
+    private val loginBootstrapUri: URI = URI.create(TIKTOK_LOGIN_BOOTSTRAP_URL),
     private val qrCreateUri: URI = URI.create(TIKTOK_QR_CREATE_URL),
-    private val qrCheckUriBuilder: (String, String) -> URI = { token, verifyFp ->
-        URI.create("$TIKTOK_QR_CHECK_URL?${tiktokQrQueryString(verifyFp = verifyFp, token = token)}")
+    private val qrCheckUriBuilder: (String) -> URI = { verifyFp ->
+        URI.create("$TIKTOK_QR_CHECK_URL?${tiktokQrCheckQueryString(verifyFp)}")
     },
     private val ttwidRegisterUri: URI? = URI.create(TIKTOK_TTWID_REGISTER_URL),
     private val qrPollIntervalMs: Long = TIKTOK_QR_POLL_INTERVAL_MS,
@@ -480,7 +481,7 @@ internal class TiktokClient(
 
 
     private suspend fun warmUpQrSession(client: HttpClient) {
-        listOf(homeUri, ssoHomeUri).distinct().forEach { uri ->
+        listOf(homeUri, loginBootstrapUri, ssoHomeUri).distinct().forEach { uri ->
             runCatching {
                 sendWithClient(
                     client,
@@ -530,7 +531,7 @@ internal class TiktokClient(
         verifyFp: String,
     ): TiktokQrCodeSession {
         val separator = if (qrCreateUri.query == null) "?" else "&"
-        val createUri = URI.create("$qrCreateUri$separator${tiktokQrQueryString(verifyFp)}")
+        val createUri = URI.create("$qrCreateUri$separator${tiktokQrCreateQueryString(verifyFp)}")
         val response = sendWithClient(
             client,
             HttpRequest.newBuilder(createUri)
@@ -553,11 +554,13 @@ internal class TiktokClient(
         client: HttpClient,
         session: TiktokQrCodeSession,
     ): TiktokQrCheckResult {
+        val formBody = tiktokQrCheckFormBody(session.token)
         val response = sendWithClient(
             client,
-            HttpRequest.newBuilder(qrCheckUriBuilder(session.token, session.verifyFp))
+            HttpRequest.newBuilder(qrCheckUriBuilder(session.verifyFp))
                 .timeout(Duration.ofSeconds(15))
-                .GET()
+                .header("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+                .POST(HttpRequest.BodyPublishers.ofString(formBody))
                 .applyQrHeaders(client)
                 .build(),
         )
@@ -666,6 +669,12 @@ private fun HttpRequest.Builder.applyCommonHeaders(
 
 private fun HttpRequest.Builder.applyQrHeaders(client: HttpClient): HttpRequest.Builder {
     applyCommonHeaders("")
+    header("sec-ch-ua", DESKTOP_SEC_CH_UA)
+    header("sec-ch-ua-mobile", "?0")
+    header("sec-ch-ua-platform", "\"Windows\"")
+    header("sec-fetch-dest", "empty")
+    header("sec-fetch-mode", "cors")
+    header("sec-fetch-site", "same-site")
     val csrf = (client.cookieHandler().orElse(null) as? CookieManager)
         ?.cookieStore
         ?.cookies
@@ -696,7 +705,9 @@ private fun CookieManager.toCookieHeader(): String {
 }
 
 private const val DESKTOP_USER_AGENT: String =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+private const val DESKTOP_SEC_CH_UA: String =
+    "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\""
 
 private const val MOBILE_USER_AGENT: String =
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
