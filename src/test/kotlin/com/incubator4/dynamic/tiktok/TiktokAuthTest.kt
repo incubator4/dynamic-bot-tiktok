@@ -75,8 +75,9 @@ class TiktokAuthTest {
 
     @Test
     fun `account info missing user is treated as cookie login failure`() {
-        assertTrue(TIKTOK_ACCOUNT_INFO_URL.contains("aid=$TIKTOK_WEB_AID"))
-        assertTrue(TIKTOK_ACCOUNT_INFO_URL.contains("account_sdk_source=web"))
+        assertTrue(TIKTOK_ACCOUNT_INFO_URL.contains("/aweme/v1/passport/account/info/v2/"))
+        assertTrue(TIKTOK_ACCOUNT_INFO_URL.contains("aid=$TIKTOK_PASSPORT_AID"))
+        assertFalse(TIKTOK_ACCOUNT_INFO_URL.contains("aid=$TIKTOK_WEB_AID"))
 
         val missing = parseTiktokAccountInfo(
             """{"message":"error","data":{"error_code":1041,"description":"用户不存在"}}""",
@@ -85,6 +86,27 @@ class TiktokAuthTest {
         assertTrue(missing.message.contains("Cookie"))
         assertTrue(missing.message.contains("sessionid"))
         assertNull(missing.account)
+    }
+
+    @Test
+    fun `account info app denied is not treated as missing cookie`() {
+        val denied = parseTiktokAccountInfo(
+            """{"message":"error","data":{"error_code":1105,"description":"该应用无权限"}}""",
+        ).toLoginResult()
+        assertEquals(PublisherLoginStatus.FAILED, denied.status)
+        assertTrue(denied.message.contains("无权限"))
+        assertTrue(denied.message.contains("扫码"))
+        assertNull(denied.account)
+    }
+
+    @Test
+    fun `passport v2 user payload maps logged in account`() {
+        val loggedIn = parseTiktokAccountInfo(
+            """{"status_code":0,"user":{"sec_uid":"MS4wSelf","nickname":"网页账号","uid":123456}}""",
+        ).toLoginResult()
+        assertEquals(PublisherLoginStatus.SUCCESS, loggedIn.status)
+        assertEquals("MS4wSelf", loggedIn.account?.userId)
+        assertEquals("网页账号", loggedIn.account?.name)
     }
 
     @Test

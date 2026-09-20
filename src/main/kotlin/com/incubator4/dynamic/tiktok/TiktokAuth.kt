@@ -17,8 +17,9 @@ internal const val TIKTOK_PLATFORM_ID: String = "tiktok"
 internal const val TIKTOK_HOME: String = "https://www.douyin.com"
 internal const val TIKTOK_LIVE_HOME: String = "https://live.douyin.com"
 internal const val TIKTOK_WEB_AID: String = "6383"
+internal const val TIKTOK_PASSPORT_AID: String = "2906"
 internal const val TIKTOK_ACCOUNT_INFO_URL: String =
-    "https://www.douyin.com/passport/web/account/info/?aid=$TIKTOK_WEB_AID&account_sdk_source=web"
+    "https://www.douyin.com/aweme/v1/passport/account/info/v2/?aid=$TIKTOK_PASSPORT_AID"
 internal const val TIKTOK_DEFAULT_AVATAR: String = "https://www.douyin.com/favicon.ico"
 
 internal open class TiktokApiException(
@@ -123,6 +124,12 @@ internal fun TiktokAccountSnapshot.toLoginResult(): PublisherLoginResult {
             message = detail.ifBlank { "抖音请求疑似被风控，已停止继续尝试。请稍后再试或更新 Cookie。" },
         )
     }
+    if (looksLikeAppDenied(detail)) {
+        return PublisherLoginResult(
+            status = PublisherLoginStatus.FAILED,
+            message = "抖音登录校验失败：当前检查接口无权限。Cookie 可能仍然有效，请改用扫码登录，或更新插件后重试。",
+        )
+    }
     if (looksLikeMissingAccount(code, detail)) {
         return PublisherLoginResult(
             status = PublisherLoginStatus.FAILED,
@@ -163,6 +170,14 @@ internal fun looksLikeRiskControl(code: Long?, message: String, httpStatus: Int?
         value.contains("captcha") ||
         value.contains("verify") ||
         value.contains("risk")
+}
+
+internal fun looksLikeAppDenied(message: String): Boolean {
+    val value = message.lowercase()
+    return value.contains("该应用无权限") ||
+        value.contains("应用无权限") ||
+        value.contains("no permission") ||
+        value.contains("permission denied")
 }
 
 internal fun looksLikeMissingAccount(code: Long?, message: String): Boolean {
