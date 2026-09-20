@@ -265,8 +265,12 @@ class TiktokClientTest {
         }
         server.createContext("/check_qrconnect/") { exchange ->
             pollCount += 1
+            assertEquals("POST", exchange.requestMethod)
+            val requestBody = exchange.requestBody.readBytes().toString(Charsets.UTF_8)
+            assertTrue(requestBody.contains("token="))
+            assertTrue(requestBody.contains("is_frontier=true"))
             val body = if (pollCount == 1) {
-                """{"error_code":0,"data":{"status":"1"}}"""
+                """{"error_code":0,"data":{"status":"new"}}"""
             } else {
                 """{"error_code":0,"data":{"status":"3","redirect_url":"http://127.0.0.1:${server.address.port}/callback"}}"""
             }
@@ -381,8 +385,9 @@ class TiktokClientTest {
             accountInfoUri = URI.create("$base/passport/web/account/info/"),
             homeUri = URI.create("$base/"),
             ssoHomeUri = URI.create("$base/"),
+            loginBootstrapUri = URI.create("$base/login/"),
             qrCreateUri = URI.create("$base/get_qrcode/"),
-            qrCheckUriBuilder = { token, _ -> URI.create("$base/check_qrconnect/?token=$token") },
+            qrCheckUriBuilder = { _ -> URI.create("$base/check_qrconnect/") },
             ttwidRegisterUri = null,
             qrPollIntervalMs = pollIntervalMs,
             qrTimeoutMs = timeoutMs,

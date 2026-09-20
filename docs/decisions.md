@@ -128,20 +128,24 @@ Out：用户名搜索、自动关注、视频无水印下载、国际版 TikTok�
 
 - Status: Accepted
 - Date: 2026-09-14
+- Updated: 2026-09-20
 - Supersedes: ADR-0004 中「二维码登录不是 MVP」的边界
 
-在 Cookie 登录之外，支持 Web 后台扫码登录。交互对齐 [dynamic-bot-bilibili](https://github.com/Colter23/dynamic-bot-bilibili) 的 `PublisherLoginProvider.loginByQrCode`，传输走抖音网页 SSO，不覆盖国际版 TikTok。Cookie 登录仍然有效，扫码只是另一种拿到会话的方式。
+在 Cookie 登录之外，支持 Web 后台扫码登录。交互对齐 [dynamic-bot-bilibili](https://github.com/Colter23/dynamic-bot-bilibili) 的 `PublisherLoginProvider.loginByQrCode`，传输走抖音网页登录域，不覆盖国际版 TikTok。Cookie 登录仍然有效，扫码只是另一种拿到会话的方式。
 
 | 项 | 约定 |
 | --- | --- |
 | 接口 | `supportedLoginMethods` 含 `COOKIE` 与 `QR_CODE`；扫码走 `loginByQrCode(onQrCode, onStatusChanged)` |
+| 端点 | 创建 / 轮询走 `login.douyin.com/passport/web/get_qrcode/` 与 `check_qrconnect/`（对齐当前网页端；旧 `sso.douyin.com/get_qrcode/` 会返回登录页 HTML，`www.douyin.com/passport/web` 旧 SSO 参数易回 `4031`） |
+| 参数 | `aid=6383`、`device_platform=web_app`、`account_sdk_source=web`、`passport_jssdk_version=3.4.4`；`verifyFp`/`s_v_web_id` 用网页指纹格式；轮询为 POST，body 含 `token` 与 `is_frontier=true` |
+| 暖机 | 先访问主站与 `/login/` 拿服务端 `passport_csrf_token`，再注册 `ttwid`，再创建二维码 |
 | 流程 | 创建二维码 → 回调 `PublisherQrLoginChallenge`（内容 / 图片、过期时间、中文说明）→ 轮询扫码态 → 确认后跟随 redirect 收集 Cookie → 用账号接口校验 → 写入本机 `config/` |
 | 状态 | 等待 / 已扫码 → `PENDING`；过期或超时 → `EXPIRED`；风控或校验失败 → `FAILED`；成功 → `SUCCESS` 并落盘 Cookie |
 | 节奏 | 扫码轮询约 2s，二维码约 180s 内有效；不因此缩短作品 / 直播检测间隔（仍按 ADR-0005） |
-| 失败 | 扫码未成功或账号校验失败时恢复原 Cookie，不覆盖仍可用的会话 |
+| 失败 | 扫码未成功或账号校验失败时恢复原 Cookie，不覆盖仍可用的会话；持续风控时提示改用 Cookie 登录 |
 | 文案 | 用户可见提示用中文；不把 Cookie、token、会话文件写进日志、文档示例或 git |
 
-不做：Cookie 自动刷新、独立扫码后台页、国际版 TikTok 扫码、绕过平台校验的签名实现。
+不做：Cookie 自动刷新、独立扫码后台页、国际版 TikTok 扫码、绕过平台校验的签名实现（如 `a_bogus`）。
 
 ## ADR-0011: 抖音链接解析
 

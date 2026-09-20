@@ -170,7 +170,7 @@ internal fun looksLikeRiskControl(code: Long?, message: String, httpStatus: Int?
         value.contains("安全风险") ||
         value.contains("系统繁忙") ||
         value.contains("captcha") ||
-        value.contains("verify") ||
+        value.contains("risk control") ||
         value.contains("risk")
 }
 

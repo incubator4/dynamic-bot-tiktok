@@ -186,6 +186,9 @@ class TiktokPublisherConfigFormTest {
         val waiting = parseTiktokQrCodeCheck("""{"error_code":0,"data":{"status":"1"}}""")
         assertEquals(TiktokQrCheckStatus.WAITING, waiting.status)
 
+        val waitingNew = parseTiktokQrCodeCheck("""{"error_code":0,"data":{"status":"new"}}""")
+        assertEquals(TiktokQrCheckStatus.WAITING, waitingNew.status)
+
         val scanned = parseTiktokQrCodeCheck("""{"error_code":0,"data":{"status":"2"}}""")
         assertEquals(TiktokQrCheckStatus.SCANNED, scanned.status)
 
@@ -252,6 +255,34 @@ class TiktokPublisherConfigFormTest {
         assertTrue(challenge.message.orEmpty().contains("抖音"))
         assertTrue(challenge.instruction.orEmpty().contains("扫一扫"))
         assertEquals(TIKTOK_QR_POLL_INTERVAL_MS, challenge.statusPollIntervalMillis)
+    }
+
+    @Test
+    fun `qr query string and verifyFp follow current web login shape`() {
+        assertTrue(TIKTOK_QR_CREATE_URL.startsWith("https://login.douyin.com/"))
+        assertTrue(TIKTOK_QR_CHECK_URL.startsWith("https://login.douyin.com/"))
+        assertTrue(TIKTOK_LOGIN_BOOTSTRAP_URL.endsWith("/login/"))
+
+        val fp = generateTiktokVerifyFp(nowMs = 1_700_000_000_000L, random = kotlin.random.Random(1))
+        assertTrue(fp.startsWith("verify_"))
+        assertTrue(fp.matches(Regex("""verify_[0-9a-z]+_[0-9A-Za-z_]{36}""")))
+
+        val createQuery = tiktokQrCreateQueryString(fp)
+        assertTrue(createQuery.contains("device_platform=web_app"))
+        assertTrue(createQuery.contains("account_sdk_source=web"))
+        assertTrue(createQuery.contains("passport_jssdk_version=3.4.4"))
+        assertTrue(createQuery.contains("is_new_login=1"))
+        assertTrue(createQuery.contains("need_short_url=true"))
+        assertFalse(createQuery.contains("account_sdk_source=sso"))
+
+        val checkQuery = tiktokQrCheckQueryString(fp)
+        assertTrue(checkQuery.contains("device_platform=web_app"))
+        assertFalse(checkQuery.contains("is_new_login=1"))
+
+        val form = tiktokQrCheckFormBody("tok-abc")
+        assertTrue(form.contains("is_frontier=true"))
+        assertTrue(form.contains("token=tok-abc"))
+        assertTrue(form.contains("is_new_login=1"))
     }
 
 }
