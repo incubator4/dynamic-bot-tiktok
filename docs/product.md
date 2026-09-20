@@ -28,7 +28,7 @@
 
 应该有：
 
-- 解析 `douyin.com` 作品 / 用户主页，以及 `v.douyin.com` 短链。
+- 解析 `douyin.com` 作品 / 用户主页，以及 `v.douyin.com` 短链（见 ADR-0011）。
 
 ## 明确不做（一期）
 

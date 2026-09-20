@@ -25,7 +25,7 @@ public object TiktokPublisherConfigForm {
                 label = "启用轮询",
                 type = ConfigFieldType.BOOLEAN,
                 section = "轮询与风控",
-                description = "开启后按配置间隔检测已订阅抖音用户的新作品和直播状态；关闭时插件仍可用于登录和后续资料查询。",
+                description = "开启后按配置间隔检测已订阅抖音用户的新作品和直播状态；关闭时插件仍可用于登录、链接解析和后续资料查询。",
                 restartRequired = true,
                 restartTarget = "抖音插件",
             ),

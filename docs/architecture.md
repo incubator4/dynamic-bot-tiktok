@@ -8,7 +8,7 @@
 抖音 Web / 接口
         │
         ▼
-本插件（登录、轮询、映射、可选链接解析）
+本插件（登录、轮询、映射、链接解析）
         │ sourceUpdatePublisher.publish(...)
         ▼
 dynamic-bot 主程序（订阅、过滤、绘图、outbox、重试）
@@ -34,7 +34,7 @@ dynamic-bot 主程序（订阅、过滤、绘图、outbox、重试）
 | 直播状态 | `*LiveStatusStore` | `TiktokLiveStatusStore`（走 `sourceStateStore`） |
 | 平台 JSON → `DynamicPayload` | `*DynamicMapper` | `TiktokDynamicMapper` |
 | 登录失效 / 风控 | `*RequestFailureHandler` | `TiktokRequestFailureHandler` |
-| 链接解析 | `*LinkResolver` | `TiktokLinkResolver`（一期宜做） |
+| 链接解析 | `*LinkResolver` | `TiktokLinkResolver` |
 
 插件类保持薄：构造 Runtime，把 core 接口委托出去。可测试逻辑放 Runtime / Mapper / Handler。
 

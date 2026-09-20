@@ -4,6 +4,9 @@ import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.config.ConfigurablePlugin
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.event.SubscriptionChangedEvent
+import top.colter.dynamic.core.link.LinkResolution
+import top.colter.dynamic.core.link.LinkResolver
+import top.colter.dynamic.core.link.ParsedLink
 import top.colter.dynamic.core.plugin.PluginContext
 import top.colter.dynamic.core.plugin.PublisherLoginMethod
 import top.colter.dynamic.core.plugin.PublisherLoginProvider
@@ -17,6 +20,7 @@ public class TiktokPublisherPlugin private constructor(
 ) :
     PublisherSourcePlugin,
     PublisherLoginProvider,
+    LinkResolver,
     ConfigurablePlugin<TiktokPublisherConfig> {
 
     public constructor() : this(TiktokPublisherRuntime())
@@ -84,6 +88,18 @@ public class TiktokPublisherPlugin private constructor(
 
     override suspend fun loginByCookie(cookie: String): PublisherLoginResult {
         return runtime.loginByCookie(cookie)
+    }
+
+    override fun matchesLink(inputUrl: String): Boolean {
+        return runtime.matchesLink(inputUrl)
+    }
+
+    override suspend fun parseLink(inputUrl: String): ParsedLink? {
+        return runtime.parseLink(inputUrl)
+    }
+
+    override suspend fun resolveLink(parsedLink: ParsedLink): LinkResolution {
+        return runtime.resolveLink(parsedLink)
     }
 
     override suspend fun loginByQrCode(

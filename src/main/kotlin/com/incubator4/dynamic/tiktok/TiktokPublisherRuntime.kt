@@ -22,6 +22,9 @@ import top.colter.dynamic.core.event.SourceUpdatePublishRequest
 import top.colter.dynamic.core.event.SourceUpdatePublisher
 import top.colter.dynamic.core.event.SubscriptionChangedEvent
 import top.colter.dynamic.core.event.SubscriptionChangeType
+import top.colter.dynamic.core.link.LinkResolution
+import top.colter.dynamic.core.link.LinkResolver
+import top.colter.dynamic.core.link.ParsedLink
 import top.colter.dynamic.core.plugin.PluginContext
 import top.colter.dynamic.core.plugin.PublisherLoginMethod
 import top.colter.dynamic.core.plugin.PublisherLoginProvider
@@ -43,6 +46,7 @@ private val logger = loggerFor<TiktokPublisherRuntime>()
 internal class TiktokPublisherRuntime() :
     PublisherSourcePlugin,
     PublisherLoginProvider,
+    LinkResolver,
     ConfigurablePlugin<TiktokPublisherConfig> {
 
     private var pluginId: String = DEFAULT_PLUGIN_ID
@@ -53,7 +57,7 @@ internal class TiktokPublisherRuntime() :
     override val configId: String
         get() = pluginId
     override val configName: String = "抖音动态源"
-    override val configDescription: String = "抖音动态与直播轮询、登录配置。"
+    override val configDescription: String = "抖音动态与直播轮询、登录与链接解析配置。"
     override val configClass = TiktokPublisherConfig::class
     override val configFormSpec = TiktokPublisherConfigForm.spec
 
@@ -82,6 +86,7 @@ internal class TiktokPublisherRuntime() :
     private lateinit var gateway: TiktokGateway
     private lateinit var requestFailureHandler: TiktokRequestFailureHandler
     private lateinit var liveStatusStore: TiktokLiveStatusStore
+    private lateinit var linkResolver: TiktokLinkResolver
     private lateinit var detectTask: TaskDefinition
 
     private val detectMutex: Mutex = Mutex()
@@ -139,6 +144,11 @@ internal class TiktokPublisherRuntime() :
         requestFailureHandler = TiktokRequestFailureHandler(
             configProvider = { config },
             notificationPublisher = context.notificationPublisher,
+        )
+        linkResolver = TiktokLinkResolver(
+            platformId = platformId,
+            gatewayProvider = { gateway },
+            requestFailureHandler = requestFailureHandler,
         )
         liveStatusStore = liveStatusStoreFactory()
         detectTask = TaskDefinition(
@@ -281,6 +291,29 @@ internal class TiktokPublisherRuntime() :
             gateway = gatewayFactory(previous)
         }
         return result
+    }
+
+    override fun matchesLink(inputUrl: String): Boolean {
+        return if (::linkResolver.isInitialized) {
+            linkResolver.matchesLink(inputUrl)
+        } else {
+            matchesTiktokLink(inputUrl)
+        }
+    }
+
+    override suspend fun parseLink(inputUrl: String): ParsedLink? {
+        return if (::linkResolver.isInitialized) {
+            linkResolver.parseLink(inputUrl)
+        } else {
+            parseTiktokDirectLink(inputUrl, platformId)
+        }
+    }
+
+    override suspend fun resolveLink(parsedLink: ParsedLink): LinkResolution {
+        if (!::linkResolver.isInitialized) {
+            return LinkResolution.Failed(parsedLink, "抖音插件尚未加载，无法解析链接")
+        }
+        return linkResolver.resolveLink(parsedLink)
     }
 
     override suspend fun loginByQrCode(

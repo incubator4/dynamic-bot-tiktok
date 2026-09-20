@@ -39,6 +39,9 @@ class TiktokLiveTest {
         assertEquals("晚安", snapshot.title)
         assertEquals("https://example.com/cover.jpg", snapshot.coverUrl)
         assertEquals("https://live.douyin.com/host1", liveRoomLink(snapshot.roomId, snapshot.userId))
+        assertEquals("主播", snapshot.nickname)
+        assertEquals("https://example.com/avatar.png", snapshot.avatarUrl)
+        assertTrue(snapshot.profileFound)
     }
 
     @Test

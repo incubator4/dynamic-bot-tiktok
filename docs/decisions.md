@@ -64,11 +64,11 @@ Cookie 只存在用户本机的 `config/`，不进 git，不写进文档示例�
 - Status: Accepted
 - Date: 2026-09-13
 
-In：Cookie / 扫码登录、用户 ID 查资料、作品轮询、`DynamicPayload` 映射、游标、风控暂停、配置表单；宜做链接解析。直播见 ADR-0009。
+In：Cookie / 扫码登录、用户 ID 查资料、作品轮询、`DynamicPayload` 映射、游标、风控暂停、配置表单、链接解析。直播见 ADR-0009。
 
 Out：用户名搜索、自动关注、视频无水印下载、国际版 TikTok、插件独立后台页、出口协议、第二套推送通道。
 
-订阅键使用抖音用户 ID。用户名 / 抖音号搜索另开 ADR。直播开播/下播见 [ADR-0009](#adr-0009-直播开播与下播订阅)。
+订阅键使用抖音用户 ID。用户名 / 抖音号搜索另开 ADR。直播开播/下播见 [ADR-0009](#adr-0009-直播开播与下播订阅)。链接解析见 [ADR-0011](#adr-0011-抖音链接解析)。
 
 ## ADR-0007: 构建与 API 版本
 
@@ -142,4 +142,19 @@ Out：用户名搜索、自动关注、视频无水印下载、国际版 TikTok�
 | 文案 | 用户可见提示用中文；不把 Cookie、token、会话文件写进日志、文档示例或 git |
 
 不做：Cookie 自动刷新、独立扫码后台页、国际版 TikTok 扫码、绕过平台校验的签名实现。
+
+## ADR-0011: 抖音链接解析
+
+- Status: Accepted
+- Date: 2026-09-20
+
+聊天里出现抖音链接时，由本插件实现 `LinkResolver`，交给主程序生成预览。对齐 [dynamic-bot-weibo](https://github.com/Colter23/dynamic-bot-weibo) / [dynamic-bot-bilibili](https://github.com/Colter23/dynamic-bot-bilibili) 的匹配 / 解析 / 解析结果模型，不另做命令或独立投递通道。
+
+| 项 | 约定 |
+| --- | --- |
+| 覆盖 | `douyin.com` / `iesdouyin.com` 作品（`/video`、`/note`）、用户主页（`/user`），以及 `v.douyin.com` 短链；用户页 `modal_id` 视为作品 |
+| 结果 | 一期没有作品 `DynamicMapper`，作品与用户都返回 `LinkResolution.Preview`；失败原因用中文 |
+| 短链 | 跟随跳转或页面里的规范地址，再按直链规则解析；展开失败时 `parseLink` 返回空，不伪装成功 |
+| 请求 | 走已登录 Cookie 与 Gateway 请求间隔；未登录 / 风控按现有失败处理暂停轮询，不加密重试 |
+| 不做 | 国际版 `tiktok.com`、视频无水印下载、直播间短链、绕过平台校验的签名实现 |
 

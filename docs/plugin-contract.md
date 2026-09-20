@@ -12,7 +12,7 @@
 | `PublisherLookupPlugin` | 用外部用户 ID 取 `PublisherInfo` |
 | `PublisherLoginProvider` | Cookie / 扫码登录、检查登录态；扫码见 ADR-0010 |
 | `ConfigurablePlugin` | 后台配置表单，文案用中文 |
-| `LinkResolver` | 一期宜做；匹配并解析抖音链接 |
+| `LinkResolver` | 已实现；匹配并解析抖音作品 / 用户主页 / `v.douyin.com` 短链 |
 
 可以后做：`PublisherFollowPlugin`、`PublisherBatchLookupPlugin`、`PublisherLatestUpdateProvider`、`LinkVideoDownloader`、`PluginAdminPageProvider`。
 

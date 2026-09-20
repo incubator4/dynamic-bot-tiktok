@@ -15,6 +15,11 @@ internal data class TiktokLiveSnapshot(
     val coverUrl: String? = null,
     val area: String? = null,
     val startedAtEpochSeconds: Long? = null,
+    val nickname: String? = null,
+    val avatarUrl: String? = null,
+    val uniqueId: String? = null,
+    val signature: String? = null,
+    val profileFound: Boolean = true,
 )
 
 internal fun parseTiktokLiveSnapshot(json: String, fallbackUserId: String): TiktokLiveSnapshot {
@@ -39,7 +44,10 @@ internal fun parseTiktokLiveSnapshot(json: String, fallbackUserId: String): Tikt
     }
 
     val user = findTiktokUserObject(root)
-        ?: return TiktokLiveSnapshot(userId = fallbackUserId.trim().ifBlank { fallbackUserId })
+        ?: return TiktokLiveSnapshot(
+            userId = fallbackUserId.trim().ifBlank { fallbackUserId },
+            profileFound = false,
+        )
     val room = resolveRoomObject(user)
     val userId = firstNonBlank(
         user.string("sec_uid", "secUid"),
@@ -47,6 +55,13 @@ internal fun parseTiktokLiveSnapshot(json: String, fallbackUserId: String): Tikt
         user.string("uid_str", "user_id_str", "uid", "user_id"),
         fallbackUserId,
     ) ?: fallbackUserId
+    val nickname = firstNonBlank(user.string("nickname", "nickName", "screen_name"))
+    val uniqueId = firstNonBlank(user.string("unique_id", "uniqueId"))
+    val signature = firstNonBlank(user.string("signature", "desc", "description"))
+    val avatarUrl = firstHttpUrl(
+        user.urlListFirst("avatar_larger", "avatar_medium", "avatar_thumb", "avatar"),
+        user.string("avatar_url", "avatar"),
+    )
     val living = isTiktokUserLiving(user, room)
     val webRid = firstNonBlank(
         user.string("web_rid", "webRid"),
@@ -89,6 +104,11 @@ internal fun parseTiktokLiveSnapshot(json: String, fallbackUserId: String): Tikt
         coverUrl = coverUrl,
         area = area,
         startedAtEpochSeconds = startedAt.takeIf { living },
+        nickname = nickname,
+        avatarUrl = avatarUrl,
+        uniqueId = uniqueId,
+        signature = signature,
+        profileFound = true,
     )
 }
 
