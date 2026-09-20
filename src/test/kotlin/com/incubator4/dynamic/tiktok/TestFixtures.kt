@@ -122,6 +122,7 @@ internal open class RecordingTiktokGateway(
     val fetchedLiveUserIds: MutableList<String> = mutableListOf()
     val expandedShortUrls: MutableList<String> = mutableListOf()
     val fetchedAwemeIds: MutableList<String> = mutableListOf()
+    var expandError: Throwable? = null
 
     override fun exportCookie(): String = exportedCookie
 
@@ -142,6 +143,7 @@ internal open class RecordingTiktokGateway(
 
     override suspend fun expandShortUrl(url: String): String? {
         expandedShortUrls += url
+        expandError?.let { throw it }
         return expandedUrls[url] ?: expandedUrls[url.trimEnd('/')]
     }
 

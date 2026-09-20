@@ -91,6 +91,20 @@ class TiktokLinkResolverTest {
     }
 
     @Test
+    fun `short link expand keeps chinese api failure`() = runBlocking {
+        val gateway = RecordingTiktokGateway()
+        gateway.expandError = TiktokBlockedException("抖音短链展开疑似被风控（HTTP 461），已停止继续尝试。请稍后再试或更新 Cookie。")
+        val resolver = TiktokLinkResolver(platformId) { gateway }
+        val parsed = assertNotNull(resolver.parseLink("https://v.douyin.com/iPxxxx"))
+
+        val resolution = resolver.resolveLink(parsed)
+
+        assertTrue(resolution is LinkResolution.Failed)
+        assertTrue(resolution.reason.contains("风控"))
+        assertTrue(resolution.cause is TiktokBlockedException)
+    }
+
+    @Test
     fun `resolve video preview from url without fetching`() = runBlocking {
         val resolver = TiktokLinkResolver(platformId)
         val parsed = assertNotNull(resolver.parseLink("https://www.douyin.com/video/$awemeId"))

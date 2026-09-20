@@ -1,5 +1,6 @@
 package com.incubator4.dynamic.tiktok
 
+import kotlinx.coroutines.CancellationException
 import top.colter.dynamic.core.data.DynamicMetric
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
@@ -11,6 +12,7 @@ import top.colter.dynamic.core.link.LinkKinds
 import top.colter.dynamic.core.link.LinkPreview
 import top.colter.dynamic.core.link.LinkResolution
 import top.colter.dynamic.core.link.ParsedLink
+import java.util.Locale
 
 internal class TiktokLinkResolver(
     private val platformId: PlatformId,
@@ -43,7 +45,18 @@ internal class TiktokLinkResolver(
     }
 
     private suspend fun resolveShortLink(parsedLink: ParsedLink): LinkResolution {
-        val expanded = runCatching { gateway.expandShortUrl(parsedLink.normalizedUrl) }.getOrNull()
+        val expanded = try {
+            gateway.expandShortUrl(parsedLink.normalizedUrl)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: TiktokApiException) {
+            return LinkResolution.Failed(
+                parsedLink = parsedLink,
+                reason = error.message?.takeIf { it.isNotBlank() }
+                    ?: "无法解析该抖音短链，请改用完整作品或用户主页链接",
+                cause = error,
+            )
+        }
         val resolved = expanded?.let { parseTiktokDirectLink(it, platformId) }
             ?: return LinkResolution.Failed(
                 parsedLink = parsedLink,
@@ -148,8 +161,8 @@ internal class TiktokLinkResolver(
 
     private fun Long.toDisplayCount(): String {
         return when {
-            this >= 100_000_000L -> "%.1f亿".format(this / 100_000_000.0).replace(".0", "")
-            this >= 10_000L -> "%.1f万".format(this / 10_000.0).replace(".0", "")
+            this >= 100_000_000L -> "%.1f亿".format(Locale.ROOT, this / 100_000_000.0).replace(".0", "")
+            this >= 10_000L -> "%.1f万".format(Locale.ROOT, this / 10_000.0).replace(".0", "")
             else -> toString()
         }
     }
