@@ -145,11 +145,7 @@ internal class TiktokPublisherRuntime() :
             configProvider = { config },
             notificationPublisher = context.notificationPublisher,
         )
-        linkResolver = TiktokLinkResolver(
-            platformId = platformId,
-            gatewayProvider = { gateway },
-            requestFailureHandler = requestFailureHandler,
-        )
+        linkResolver = TiktokLinkResolver(platformId)
         liveStatusStore = liveStatusStoreFactory()
         detectTask = TaskDefinition(
             id = detectTaskId,
@@ -305,7 +301,7 @@ internal class TiktokPublisherRuntime() :
         return if (::linkResolver.isInitialized) {
             linkResolver.parseLink(inputUrl)
         } else {
-            parseTiktokDirectLink(inputUrl, platformId)
+            parseTiktokLink(inputUrl, platformId)
         }
     }
 

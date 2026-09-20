@@ -110,52 +110,6 @@ class TiktokClientTest {
     }
 
     @Test
-    fun `expand response prefers canonical douyin url`() {
-        val client = TiktokClient(TiktokPublisherConfig(cookie = "sessionid=valid"))
-        assertEquals(
-            "https://www.douyin.com/video/7123456789012345678",
-            client.parseExpandResponse(
-                200,
-                "https://www.iesdouyin.com/share/video/7123456789012345678",
-                "<html></html>",
-            ),
-        )
-        assertEquals(
-            "https://www.douyin.com/user/MS4wLjABAAAAtest",
-            client.parseExpandResponse(
-                200,
-                "https://v.douyin.com/iPxxxx/",
-                """<link rel="canonical" href="https://www.douyin.com/user/MS4wLjABAAAAtest">""",
-            ),
-        )
-    }
-
-    @Test
-    fun `fetch aweme snapshot parses video page json`() = runBlocking {
-        val server = HttpServer.create(InetSocketAddress(0), 0)
-        server.createContext("/video/") { exchange ->
-            val body = """{"aweme_id":"7123456789012345678","desc":"作品","author":{"sec_uid":"MS4w","nickname":"作者"}}"""
-            val bytes = body.toByteArray()
-            exchange.sendResponseHeaders(200, bytes.size.toLong())
-            exchange.responseBody.use { it.write(bytes) }
-        }
-        server.start()
-        try {
-            val base = URI.create("http://127.0.0.1:${server.address.port}/video/")
-            val snapshot = TiktokClient(
-                config = TiktokPublisherConfig(cookie = "sessionid=valid"),
-                httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(),
-                awemeUriBuilder = { awemeId, _ -> URI.create("${base}$awemeId") },
-            ).fetchAwemeSnapshot("7123456789012345678")
-            assertEquals("7123456789012345678", snapshot?.awemeId)
-            assertEquals("作品", snapshot?.description)
-            assertEquals("MS4w", snapshot?.authorUserId)
-        } finally {
-            server.stop(0)
-        }
-    }
-
-    @Test
     fun `missing cookie does not request account info`() = runBlocking {
         val result = TiktokClient(TiktokPublisherConfig(cookie = "   ")).checkLoginState()
         assertEquals(PublisherLoginStatus.FAILED, result.status)

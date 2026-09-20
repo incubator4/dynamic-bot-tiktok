@@ -19,12 +19,6 @@ internal interface TiktokGateway {
         return TiktokLiveSnapshot(userId = userId)
     }
 
-    suspend fun expandShortUrl(url: String): String? = null
-
-    suspend fun fetchAwemeSnapshot(awemeId: String, note: Boolean = false): TiktokAwemeSnapshot? {
-        throw TiktokApiException("不支持抖音作品详情查询")
-    }
-
     suspend fun loginByQrCode(
         onQrCode: suspend (PublisherQrLoginChallenge) -> Unit,
         onStatusChanged: suspend (PublisherLoginResult) -> Unit,
@@ -53,18 +47,6 @@ internal class TiktokHttpGateway(
     override suspend fun fetchLiveSnapshot(userId: String): TiktokLiveSnapshot {
         return withRequestInterval {
             client.fetchLiveSnapshot(userId)
-        }
-    }
-
-    override suspend fun expandShortUrl(url: String): String? {
-        return withRequestInterval {
-            client.expandShortUrl(url)
-        }
-    }
-
-    override suspend fun fetchAwemeSnapshot(awemeId: String, note: Boolean): TiktokAwemeSnapshot? {
-        return withRequestInterval {
-            client.fetchAwemeSnapshot(awemeId, note)
         }
     }
 

@@ -108,8 +108,6 @@ internal open class RecordingTiktokGateway(
     var loginResult: PublisherLoginResult = PublisherLoginResult(PublisherLoginStatus.SUCCESS, "登录成功"),
     private val exportedCookie: String = "",
     private val liveSnapshots: MutableMap<String, MutableList<TiktokLiveSnapshot>> = mutableMapOf(),
-    private val awemeSnapshots: MutableMap<String, MutableList<TiktokAwemeSnapshot>> = mutableMapOf(),
-    private val expandedUrls: MutableMap<String, String> = mutableMapOf(),
     var qrLoginOutcome: TiktokQrLoginOutcome = TiktokQrLoginOutcome(
         result = PublisherLoginResult(
             status = PublisherLoginStatus.UNSUPPORTED,
@@ -120,8 +118,6 @@ internal open class RecordingTiktokGateway(
     var loginCheckCount: Int = 0
         private set
     val fetchedLiveUserIds: MutableList<String> = mutableListOf()
-    val fetchedAwemeIds: MutableList<String> = mutableListOf()
-    val expandedShortUrls: MutableList<String> = mutableListOf()
 
     override fun exportCookie(): String = exportedCookie
 
@@ -138,17 +134,6 @@ internal open class RecordingTiktokGateway(
         } else {
             queue.removeAt(0)
         }
-    }
-
-    override suspend fun expandShortUrl(url: String): String? {
-        expandedShortUrls += url
-        return expandedUrls[url]
-    }
-
-    override suspend fun fetchAwemeSnapshot(awemeId: String, note: Boolean): TiktokAwemeSnapshot? {
-        fetchedAwemeIds += awemeId
-        val queue = awemeSnapshots[awemeId] ?: return null
-        return if (queue.isEmpty()) null else queue.removeAt(0)
     }
 
     override suspend fun loginByQrCode(
@@ -175,14 +160,6 @@ internal open class RecordingTiktokGateway(
 
     fun enqueueLive(userId: String, vararg snapshots: TiktokLiveSnapshot) {
         liveSnapshots.getOrPut(userId) { mutableListOf() }.addAll(snapshots)
-    }
-
-    fun enqueueAweme(awemeId: String, vararg snapshots: TiktokAwemeSnapshot) {
-        awemeSnapshots.getOrPut(awemeId) { mutableListOf() }.addAll(snapshots)
-    }
-
-    fun enqueueExpand(shortUrl: String, expanded: String) {
-        expandedUrls[shortUrl] = expanded
     }
 }
 

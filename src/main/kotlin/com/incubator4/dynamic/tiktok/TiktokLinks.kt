@@ -5,12 +5,22 @@ import top.colter.dynamic.core.link.LinkKinds
 import top.colter.dynamic.core.link.ParsedLink
 import java.net.URI
 
-internal const val TIKTOK_SHARE_HOME: String = "https://www.iesdouyin.com"
+internal const val TIKTOK_SHORT_LINK_KIND: String = "short"
 
 internal fun matchesTiktokLink(inputUrl: String): Boolean {
     val normalized = normalizeTiktokInputUrl(inputUrl)
     if (normalized.isBlank()) return false
     return parseTiktokDirectLink(normalized) != null || isTiktokShortUrl(normalized)
+}
+
+internal fun parseTiktokLink(
+    inputUrl: String,
+    platformId: PlatformId = PlatformId.of(TIKTOK_PLATFORM_ID),
+): ParsedLink? {
+    val normalized = normalizeTiktokInputUrl(inputUrl)
+    if (normalized.isBlank()) return null
+    parseTiktokDirectLink(normalized, platformId)?.let { return it }
+    return parseTiktokShortLink(normalized, platformId)
 }
 
 internal fun parseTiktokDirectLink(
@@ -37,38 +47,38 @@ internal fun parseTiktokDirectLink(
     return null
 }
 
-internal fun isTiktokShortUrl(inputUrl: String): Boolean {
-    val uri = runCatching { URI(normalizeTiktokInputUrl(inputUrl)) }.getOrNull() ?: return false
-    val scheme = uri.scheme?.lowercase() ?: return false
-    if (scheme != "http" && scheme != "https") return false
-    val host = uri.host?.lowercase() ?: return false
-    if (!host.isDouyinShortHost()) return false
-    val code = uri.path
-        ?.split("/")
-        ?.firstOrNull { it.isNotBlank() }
-        ?.takeIf { it.isDouyinShortCode() }
-    return code != null
-}
+internal fun isTiktokShortUrl(inputUrl: String): Boolean = tiktokShortCode(inputUrl) != null
 
 internal fun awemeLink(awemeId: String, note: Boolean): String {
     val kind = if (note) "note" else "video"
     return "$TIKTOK_HOME/$kind/${awemeId.trim()}"
 }
 
-internal fun extractTiktokShareRedirectTarget(body: String): String? {
-    CANONICAL_HREF_REGEX.find(body)?.groupValues?.getOrNull(1)?.let { candidate ->
-        parseTiktokDirectLink(candidate)?.normalizedUrl?.let { return it }
-    }
-    LOCATION_HREF_REGEX.findAll(body).forEach { match ->
-        parseTiktokDirectLink(match.groupValues[1])?.normalizedUrl?.let { return it }
-    }
-    DOUYIN_URL_REGEX.findAll(body).forEach { match ->
-        parseTiktokDirectLink(match.value)?.normalizedUrl?.let { return it }
-    }
-    SHARE_PATH_REGEX.find(body)?.groupValues?.getOrNull(1)?.let { path ->
-        parseTiktokDirectLink("$TIKTOK_SHARE_HOME/$path")?.normalizedUrl?.let { return it }
-    }
-    return null
+private fun parseTiktokShortLink(
+    inputUrl: String,
+    platformId: PlatformId,
+): ParsedLink? {
+    val normalized = normalizeTiktokInputUrl(inputUrl)
+    val code = tiktokShortCode(normalized) ?: return null
+    return ParsedLink(
+        platformId = platformId,
+        kind = TIKTOK_SHORT_LINK_KIND,
+        targetId = code,
+        normalizedUrl = normalized,
+        sourceUrl = normalized,
+    )
+}
+
+private fun tiktokShortCode(inputUrl: String): String? {
+    val uri = runCatching { URI(normalizeTiktokInputUrl(inputUrl)) }.getOrNull() ?: return null
+    val scheme = uri.scheme?.lowercase() ?: return null
+    if (scheme != "http" && scheme != "https") return null
+    val host = uri.host?.lowercase() ?: return null
+    if (!host.isDouyinShortHost()) return null
+    return uri.path
+        ?.split("/")
+        ?.firstOrNull { it.isNotBlank() }
+        ?.takeIf { it.isDouyinShortCode() }
 }
 
 internal fun normalizeTiktokInputUrl(raw: String): String {
@@ -231,15 +241,3 @@ private fun String.isDouyinUserId(): Boolean {
 private fun String.isDouyinShortCode(): Boolean {
     return length in 4..24 && all { it.isLetterOrDigit() }
 }
-
-private val CANONICAL_HREF_REGEX: Regex =
-    Regex("""<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
-
-private val LOCATION_HREF_REGEX: Regex =
-    Regex("""(?:window\.)?location(?:\.href)?\s*=\s*["'](https?://[^"']+)["']""", RegexOption.IGNORE_CASE)
-
-private val DOUYIN_URL_REGEX: Regex =
-    Regex("""https?://(?:www\.)?(?:iesdouyin|douyin)\.com/(?:share/)?(?:video|note|user)/[A-Za-z0-9._-]+""")
-
-private val SHARE_PATH_REGEX: Regex =
-    Regex("""["']/(share/(?:video|note|user)/[A-Za-z0-9._-]+)["']""")
