@@ -89,6 +89,14 @@ class TiktokLiveTest {
     }
 
     @Test
+    fun `author meta is not treated as login wall`() {
+        assertTrue(looksLikeHtmlLoginWall("<html><title>登录</title></html>"))
+        assertTrue(!looksLikeHtmlLoginWall(
+            """<html><title>作品标题</title><meta name="author" content="页面作者"><meta property="og:image" content="https://example.com/og.jpg"></html>""",
+        ))
+    }
+
+    @Test
     fun `extract html meta author and cover`() {
         val meta = extractTiktokHtmlMeta(
             """

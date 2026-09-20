@@ -371,7 +371,7 @@ internal class TiktokClient(
         val payload = try {
             extractTiktokEmbeddedPayload(trimmed)
         } catch (error: TiktokApiException) {
-            if (looksLikeHtml(trimmed) && looksLikeLoginFailure(trimmed)) {
+            if (looksLikeHtml(trimmed) && looksLikeHtmlLoginWall(trimmed)) {
                 throw TiktokLoginException(
                     "抖音 Cookie 未登录或已失效，请重新登录后导入包含 sessionid 的完整 Cookie",
                 )
@@ -400,7 +400,7 @@ internal class TiktokClient(
         val payload = try {
             extractTiktokEmbeddedPayload(trimmed)
         } catch (error: TiktokApiException) {
-            if (looksLikeHtml(trimmed) && looksLikeLoginFailure(trimmed)) {
+            if (looksLikeHtml(trimmed) && looksLikeHtmlLoginWall(trimmed)) {
                 throw TiktokLoginException(
                     "抖音 Cookie 未登录或已失效，请重新登录后导入包含 sessionid 的完整 Cookie",
                 )

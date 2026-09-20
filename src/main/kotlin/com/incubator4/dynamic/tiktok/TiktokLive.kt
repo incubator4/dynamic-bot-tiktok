@@ -130,6 +130,14 @@ internal fun extractTiktokEmbeddedPayload(body: String): String {
     throw TiktokApiException("抖音页面没有返回可用的资料数据")
 }
 
+internal fun looksLikeHtmlLoginWall(body: String): Boolean {
+    val meta = extractTiktokHtmlMeta(body)
+    if (!meta.coverUrl.isNullOrBlank() || !meta.authorName.isNullOrBlank()) {
+        return false
+    }
+    return looksLikeLoginFailure(firstNonBlank(meta.title, meta.description).orEmpty())
+}
+
 internal fun extractTiktokHtmlMeta(body: String): TiktokHtmlMeta {
     val html = body.trim()
     if (html.isEmpty()) return TiktokHtmlMeta()
