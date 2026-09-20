@@ -15,6 +15,17 @@ class TiktokLinkResolverTest {
     private val platformId = PlatformId.of(TIKTOK_PLATFORM_ID)
     private val awemeId = "7123456789012345678"
     private val userId = "MS4wLjABAAAAtest"
+    private val aweme = TiktokAwemeSnapshot(
+        awemeId = awemeId,
+        description = "测试作品",
+        authorUserId = userId,
+        authorName = "测试作者",
+        authorAvatarUrl = "https://example.com/avatar.png",
+        coverUrl = "https://example.com/cover.jpg",
+        durationSeconds = 15,
+        likeCount = 12000,
+        playCount = 100000,
+    )
 
     @Test
     fun `parse video note user and share links`() = runBlocking {
@@ -44,7 +55,7 @@ class TiktokLinkResolverTest {
     }
 
     @Test
-    fun `short link parse succeeds but resolve returns chinese failure`() = runBlocking {
+    fun `short link parse succeeds but resolve fails without expand`() = runBlocking {
         val resolver = TiktokLinkResolver(platformId)
 
         val parsed = assertNotNull(resolver.parseLink("https://v.douyin.com/iPxxxx"))
@@ -60,6 +71,40 @@ class TiktokLinkResolverTest {
     }
 
     @Test
+    fun `short link expand then resolve author and cover`() = runBlocking {
+        val gateway = RecordingTiktokGateway()
+        gateway.enqueueExpand(
+            "https://v.douyin.com/iPxxxx",
+            "https://www.iesdouyin.com/share/video/$awemeId",
+        )
+        gateway.enqueueAweme(awemeId, aweme)
+        val resolver = TiktokLinkResolver(platformId) { gateway }
+
+        val parsed = assertNotNull(resolver.parseLink("https://v.douyin.com/iPxxxx"))
+        val resolution = resolver.resolveLink(parsed)
+
+        assertTrue(resolution is LinkResolution.Preview)
+        assertEquals(userId, resolution.preview.publisher?.externalId)
+        assertEquals("测试作者", resolution.preview.publisher?.name)
+        assertEquals("https://example.com/cover.jpg", resolution.preview.cover?.uri)
+        assertEquals(listOf("https://v.douyin.com/iPxxxx"), gateway.expandedShortUrls)
+    }
+
+    @Test
+    fun `short link expand keeps chinese api failure`() = runBlocking {
+        val gateway = RecordingTiktokGateway()
+        gateway.expandError = TiktokBlockedException("抖音短链展开疑似被风控（HTTP 461），已停止继续尝试。请稍后再试或更新 Cookie。")
+        val resolver = TiktokLinkResolver(platformId) { gateway }
+        val parsed = assertNotNull(resolver.parseLink("https://v.douyin.com/iPxxxx"))
+
+        val resolution = resolver.resolveLink(parsed)
+
+        assertTrue(resolution is LinkResolution.Failed)
+        assertTrue(resolution.reason.contains("风控"))
+        assertTrue(resolution.cause is TiktokBlockedException)
+    }
+
+    @Test
     fun `resolve video preview from url without fetching`() = runBlocking {
         val resolver = TiktokLinkResolver(platformId)
         val parsed = assertNotNull(resolver.parseLink("https://www.douyin.com/video/$awemeId"))
@@ -72,6 +117,24 @@ class TiktokLinkResolverTest {
         assertEquals("视频", resolution.preview.badge)
         assertEquals("https://www.douyin.com/video/$awemeId", resolution.preview.url)
         assertNull(resolution.preview.publisher)
+        assertNull(resolution.preview.cover)
+    }
+
+    @Test
+    fun `resolve video preview fills author and cover`() = runBlocking {
+        val gateway = RecordingTiktokGateway()
+        gateway.enqueueAweme(awemeId, aweme)
+        val resolver = TiktokLinkResolver(platformId) { gateway }
+        val parsed = assertNotNull(resolver.parseLink("https://www.douyin.com/video/$awemeId"))
+
+        val resolution = resolver.resolveLink(parsed)
+
+        assertTrue(resolution is LinkResolution.Preview)
+        assertEquals("测试作品", resolution.preview.title)
+        assertEquals(userId, resolution.preview.publisher?.externalId)
+        assertEquals("测试作者", resolution.preview.publisher?.name)
+        assertEquals("https://example.com/cover.jpg", resolution.preview.cover?.uri)
+        assertEquals("1.2万", resolution.preview.metrics.first { it.key == "like" }.display)
     }
 
     @Test

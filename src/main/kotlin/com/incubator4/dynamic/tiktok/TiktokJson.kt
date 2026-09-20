@@ -88,6 +88,15 @@ internal fun JsonObject.urlListFirst(vararg objectKeys: String): String? {
     return null
 }
 
+internal fun JsonObject.mediaUrl(vararg keys: String): String? {
+    keys.forEach { key ->
+        array(key)?.firstNotNullOfOrNull { firstHttpUrl(it.asTrimmedString()) }?.let { return it }
+        urlListFirst(key)?.let { return it }
+        firstHttpUrl(string(key))?.let { return it }
+    }
+    return null
+}
+
 internal fun parseTiktokEpochSeconds(raw: Long?): Long? {
     val value = raw ?: return null
     if (value <= 0L) return null

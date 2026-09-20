@@ -145,7 +145,10 @@ internal class TiktokPublisherRuntime() :
             configProvider = { config },
             notificationPublisher = context.notificationPublisher,
         )
-        linkResolver = TiktokLinkResolver(platformId)
+        linkResolver = TiktokLinkResolver(
+            platformId = platformId,
+            gatewayProvider = { gateway },
+        )
         liveStatusStore = liveStatusStoreFactory()
         detectTask = TaskDefinition(
             id = detectTaskId,

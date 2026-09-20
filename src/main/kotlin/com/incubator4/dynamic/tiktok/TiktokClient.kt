@@ -28,6 +28,14 @@ internal class TiktokClient(
     private val userProfileUriBuilder: (String) -> URI = { userId ->
         URI.create("$TIKTOK_HOME/user/${URLEncoder.encode(userId, StandardCharsets.UTF_8)}")
     },
+    private val awemeUriBuilder: (String, Boolean) -> URI = { awemeId, note ->
+        val kind = if (note) "note" else "video"
+        URI.create("$TIKTOK_HOME/$kind/${URLEncoder.encode(awemeId, StandardCharsets.UTF_8)}")
+    },
+    private val shareAwemeUriBuilder: (String, Boolean) -> URI = { awemeId, note ->
+        val kind = if (note) "note" else "video"
+        URI.create("$TIKTOK_SHARE_HOME/share/$kind/${URLEncoder.encode(awemeId, StandardCharsets.UTF_8)}")
+    },
     private val homeUri: URI = URI.create("$TIKTOK_HOME/"),
     private val ssoHomeUri: URI = URI.create("$TIKTOK_SSO_HOME/"),
     private val qrCreateUri: URI = URI.create(TIKTOK_QR_CREATE_URL),
@@ -88,6 +96,112 @@ internal class TiktokClient(
         } catch (error: Throwable) {
             throw TiktokApiException(error.message ?: "抖音直播状态检查失败", error)
         }
+    }
+
+    suspend fun expandShortUrl(url: String): String {
+        val normalized = normalizeTiktokInputUrl(url)
+        require(normalized.isNotBlank()) { "抖音短链不能为空" }
+        return try {
+            val response = send(
+                HttpRequest.newBuilder(URI.create(normalized))
+                    .timeout(Duration.ofSeconds(8))
+                    .GET()
+                    .applyCommonHeaders("", referer = TIKTOK_HOME, userAgent = MOBILE_USER_AGENT)
+                    .build(),
+            )
+            parseExpandResponse(response.statusCode(), response.uri().toString(), response.body())
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: TiktokApiException) {
+            throw error
+        } catch (error: Throwable) {
+            throw TiktokApiException(error.message ?: "无法展开抖音短链", error)
+        }
+    }
+
+    suspend fun fetchAwemeSnapshot(awemeId: String, note: Boolean = false): TiktokAwemeSnapshot? {
+        val normalized = awemeId.trim()
+        require(normalized.isNotBlank()) { "抖音作品 ID 不能为空" }
+        return try {
+            val shareSnapshot = try {
+                fetchAwemeSnapshotFrom(
+                    uri = shareAwemeUriBuilder(normalized, note),
+                    cookieHeader = "",
+                    awemeId = normalized,
+                    referer = "$TIKTOK_SHARE_HOME/",
+                    userAgent = MOBILE_USER_AGENT,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: TiktokLoginException) {
+                throw error
+            } catch (error: TiktokBlockedException) {
+                throw error
+            } catch (error: Throwable) {
+                logger.info { "抖音分享页作品详情不可用，改走桌面页：${error.message}" }
+                null
+            }
+            if (shareSnapshot?.hasPreviewIdentity() == true) {
+                return shareSnapshot
+            }
+            if (config.requestIntervalSeconds > 0) {
+                delay(secondsToMillis(config.requestIntervalSeconds, minimumMillis = 1_000))
+            }
+            val desktopSnapshot = try {
+                fetchAwemeSnapshotFrom(
+                    uri = awemeUriBuilder(normalized, note),
+                    cookieHeader = "",
+                    awemeId = normalized,
+                    referer = awemeLink(normalized, note),
+                    userAgent = DESKTOP_USER_AGENT,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: TiktokLoginException) {
+                throw error
+            } catch (error: TiktokBlockedException) {
+                throw error
+            } catch (error: Throwable) {
+                if (shareSnapshot != null) {
+                    logger.info { "抖音桌面页作品详情不可用，沿用分享页结果：${error.message}" }
+                    null
+                } else {
+                    throw if (error is TiktokApiException) {
+                        error
+                    } else {
+                        TiktokApiException(error.message ?: "抖音作品详情检查失败", error)
+                    }
+                }
+            }
+            when {
+                shareSnapshot == null -> desktopSnapshot
+                desktopSnapshot == null -> shareSnapshot
+                else -> shareSnapshot.mergeMissingFrom(desktopSnapshot)
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: TiktokApiException) {
+            throw error
+        } catch (error: Throwable) {
+            throw TiktokApiException(error.message ?: "抖音作品详情检查失败", error)
+        }
+    }
+
+    private suspend fun fetchAwemeSnapshotFrom(
+        uri: URI,
+        cookieHeader: String,
+        awemeId: String,
+        referer: String,
+        userAgent: String,
+    ): TiktokAwemeSnapshot? {
+        val response = send(
+            HttpRequest.newBuilder(uri)
+                .timeout(Duration.ofSeconds(15))
+                .GET()
+                .applyCommonHeaders(cookieHeader, referer = referer, userAgent = userAgent)
+                .build(),
+        )
+        return parseAwemeResponse(response.statusCode(), response.body(), awemeId)
     }
 
     fun exportCookieHeader(): String = currentCookieHeader()
@@ -234,7 +348,7 @@ internal class TiktokClient(
         val payload = try {
             extractTiktokEmbeddedPayload(trimmed)
         } catch (error: TiktokApiException) {
-            if (looksLikeHtml(trimmed) && looksLikeLoginFailure(trimmed)) {
+            if (looksLikeHtml(trimmed) && looksLikeHtmlLoginWall(trimmed)) {
                 throw TiktokLoginException(
                     "抖音 Cookie 未登录或已失效，请重新登录后导入包含 sessionid 的完整 Cookie",
                 )
@@ -242,6 +356,51 @@ internal class TiktokClient(
             throw error
         }
         return parseTiktokLiveSnapshot(payload, userId)
+    }
+
+    internal fun parseAwemeResponse(statusCode: Int, body: String, awemeId: String): TiktokAwemeSnapshot? {
+        if (statusCode == 401) {
+            throw TiktokLoginException("抖音登录状态不可用：HTTP $statusCode")
+        }
+        if (looksLikeRiskControl(code = null, message = "", httpStatus = statusCode)) {
+            throw TiktokBlockedException(
+                "抖音请求疑似被风控（HTTP $statusCode），已停止继续尝试。请稍后再试或更新 Cookie。",
+            )
+        }
+        if (statusCode !in 200..299) {
+            throw TiktokApiException("抖音作品详情检查失败：HTTP $statusCode")
+        }
+        val trimmed = body.trim()
+        if (trimmed.isEmpty()) {
+            throw TiktokApiException("抖音作品页面没有返回内容")
+        }
+        val payload = try {
+            extractTiktokEmbeddedPayload(trimmed)
+        } catch (error: TiktokApiException) {
+            if (looksLikeHtml(trimmed) && looksLikeHtmlLoginWall(trimmed)) {
+                throw TiktokLoginException(
+                    "抖音 Cookie 未登录或已失效，请重新登录后导入包含 sessionid 的完整 Cookie",
+                )
+            }
+            null
+        }
+        val snapshot = payload?.let { parseTiktokAwemeSnapshot(it, awemeId) }
+        val meta = extractTiktokHtmlMeta(trimmed)
+        return snapshot?.enrichWithHtmlMeta(meta, awemeId) ?: meta.toAwemeSnapshot(awemeId)
+    }
+
+    internal fun parseExpandResponse(statusCode: Int, finalUrl: String, body: String): String {
+        if (looksLikeRiskControl(code = null, message = "", httpStatus = statusCode)) {
+            throw TiktokBlockedException(
+                "抖音短链展开疑似被风控（HTTP $statusCode），已停止继续尝试。请稍后再试或更新 Cookie。",
+            )
+        }
+        parseTiktokDirectLink(finalUrl)?.normalizedUrl?.let { return it }
+        extractTiktokShareRedirectTarget(body)?.let { return it }
+        if (statusCode !in 200..299) {
+            throw TiktokApiException("无法展开抖音短链：HTTP $statusCode")
+        }
+        throw TiktokApiException("无法从短链得到抖音作品或用户主页地址")
     }
 
     internal fun toLoginResult(statusCode: Int, body: String): PublisherLoginResult {
@@ -489,10 +648,11 @@ internal class TiktokClient(
 private fun HttpRequest.Builder.applyCommonHeaders(
     cookieHeader: String,
     referer: String = "$TIKTOK_HOME/",
+    userAgent: String = DESKTOP_USER_AGENT,
 ): HttpRequest.Builder {
     header("Accept", "application/json, text/plain, */*")
     header("Accept-Language", "zh-CN,zh;q=0.9")
-    header("User-Agent", DESKTOP_USER_AGENT)
+    header("User-Agent", userAgent)
     header("Origin", TIKTOK_HOME)
     header("Referer", referer)
     if (cookieHeader.isNotBlank()) {
@@ -537,3 +697,6 @@ private fun CookieManager.toCookieHeader(): String {
 
 private const val DESKTOP_USER_AGENT: String =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0"
+
+private const val MOBILE_USER_AGENT: String =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"

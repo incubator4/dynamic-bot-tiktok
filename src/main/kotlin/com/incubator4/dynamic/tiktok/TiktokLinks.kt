@@ -6,6 +6,7 @@ import top.colter.dynamic.core.link.ParsedLink
 import java.net.URI
 
 internal const val TIKTOK_SHORT_LINK_KIND: String = "short"
+internal const val TIKTOK_SHARE_HOME: String = "https://www.iesdouyin.com"
 
 internal fun matchesTiktokLink(inputUrl: String): Boolean {
     val normalized = normalizeTiktokInputUrl(inputUrl)
@@ -52,6 +53,22 @@ internal fun isTiktokShortUrl(inputUrl: String): Boolean = tiktokShortCode(input
 internal fun awemeLink(awemeId: String, note: Boolean): String {
     val kind = if (note) "note" else "video"
     return "$TIKTOK_HOME/$kind/${awemeId.trim()}"
+}
+
+internal fun extractTiktokShareRedirectTarget(body: String): String? {
+    CANONICAL_HREF_REGEX.find(body)?.groupValues?.getOrNull(1)?.let { candidate ->
+        parseTiktokDirectLink(candidate)?.normalizedUrl?.let { return it }
+    }
+    LOCATION_HREF_REGEX.findAll(body).forEach { match ->
+        parseTiktokDirectLink(match.groupValues[1])?.normalizedUrl?.let { return it }
+    }
+    DOUYIN_URL_REGEX.findAll(body).forEach { match ->
+        parseTiktokDirectLink(match.value)?.normalizedUrl?.let { return it }
+    }
+    SHARE_PATH_REGEX.find(body)?.groupValues?.getOrNull(1)?.let { path ->
+        parseTiktokDirectLink("$TIKTOK_SHARE_HOME/$path")?.normalizedUrl?.let { return it }
+    }
+    return null
 }
 
 private fun parseTiktokShortLink(
@@ -241,3 +258,15 @@ private fun String.isDouyinUserId(): Boolean {
 private fun String.isDouyinShortCode(): Boolean {
     return length in 4..24 && all { it.isLetterOrDigit() }
 }
+
+private val CANONICAL_HREF_REGEX: Regex =
+    Regex("""<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+
+private val LOCATION_HREF_REGEX: Regex =
+    Regex("""(?:window\.)?location(?:\.href)?\s*=\s*["'](https?://[^"']+)["']""", RegexOption.IGNORE_CASE)
+
+private val DOUYIN_URL_REGEX: Regex =
+    Regex("""https?://(?:www\.)?(?:iesdouyin|douyin)\.com/(?:share/)?(?:video|note|user)/[A-Za-z0-9._-]+""")
+
+private val SHARE_PATH_REGEX: Regex =
+    Regex("""["']/(share/(?:video|note|user)/[A-Za-z0-9._-]+)["']""")
