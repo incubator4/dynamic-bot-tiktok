@@ -5,12 +5,23 @@ import top.colter.dynamic.core.link.LinkKinds
 import top.colter.dynamic.core.link.ParsedLink
 import java.net.URI
 
+internal const val TIKTOK_SHORT_LINK_KIND: String = "short"
 internal const val TIKTOK_SHARE_HOME: String = "https://www.iesdouyin.com"
 
 internal fun matchesTiktokLink(inputUrl: String): Boolean {
     val normalized = normalizeTiktokInputUrl(inputUrl)
     if (normalized.isBlank()) return false
     return parseTiktokDirectLink(normalized) != null || isTiktokShortUrl(normalized)
+}
+
+internal fun parseTiktokLink(
+    inputUrl: String,
+    platformId: PlatformId = PlatformId.of(TIKTOK_PLATFORM_ID),
+): ParsedLink? {
+    val normalized = normalizeTiktokInputUrl(inputUrl)
+    if (normalized.isBlank()) return null
+    parseTiktokDirectLink(normalized, platformId)?.let { return it }
+    return parseTiktokShortLink(normalized, platformId)
 }
 
 internal fun parseTiktokDirectLink(
@@ -37,18 +48,7 @@ internal fun parseTiktokDirectLink(
     return null
 }
 
-internal fun isTiktokShortUrl(inputUrl: String): Boolean {
-    val uri = runCatching { URI(normalizeTiktokInputUrl(inputUrl)) }.getOrNull() ?: return false
-    val scheme = uri.scheme?.lowercase() ?: return false
-    if (scheme != "http" && scheme != "https") return false
-    val host = uri.host?.lowercase() ?: return false
-    if (!host.isDouyinShortHost()) return false
-    val code = uri.path
-        ?.split("/")
-        ?.firstOrNull { it.isNotBlank() }
-        ?.takeIf { it.isDouyinShortCode() }
-    return code != null
-}
+internal fun isTiktokShortUrl(inputUrl: String): Boolean = tiktokShortCode(inputUrl) != null
 
 internal fun awemeLink(awemeId: String, note: Boolean): String {
     val kind = if (note) "note" else "video"
@@ -69,6 +69,33 @@ internal fun extractTiktokShareRedirectTarget(body: String): String? {
         parseTiktokDirectLink("$TIKTOK_SHARE_HOME/$path")?.normalizedUrl?.let { return it }
     }
     return null
+}
+
+private fun parseTiktokShortLink(
+    inputUrl: String,
+    platformId: PlatformId,
+): ParsedLink? {
+    val normalized = normalizeTiktokInputUrl(inputUrl)
+    val code = tiktokShortCode(normalized) ?: return null
+    return ParsedLink(
+        platformId = platformId,
+        kind = TIKTOK_SHORT_LINK_KIND,
+        targetId = code,
+        normalizedUrl = normalized,
+        sourceUrl = normalized,
+    )
+}
+
+private fun tiktokShortCode(inputUrl: String): String? {
+    val uri = runCatching { URI(normalizeTiktokInputUrl(inputUrl)) }.getOrNull() ?: return null
+    val scheme = uri.scheme?.lowercase() ?: return null
+    if (scheme != "http" && scheme != "https") return null
+    val host = uri.host?.lowercase() ?: return null
+    if (!host.isDouyinShortHost()) return null
+    return uri.path
+        ?.split("/")
+        ?.firstOrNull { it.isNotBlank() }
+        ?.takeIf { it.isDouyinShortCode() }
 }
 
 internal fun normalizeTiktokInputUrl(raw: String): String {

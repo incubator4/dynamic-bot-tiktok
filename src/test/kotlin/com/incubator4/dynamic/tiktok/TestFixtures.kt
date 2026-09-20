@@ -120,8 +120,8 @@ internal open class RecordingTiktokGateway(
     var loginCheckCount: Int = 0
         private set
     val fetchedLiveUserIds: MutableList<String> = mutableListOf()
-    val fetchedAwemeIds: MutableList<String> = mutableListOf()
     val expandedShortUrls: MutableList<String> = mutableListOf()
+    val fetchedAwemeIds: MutableList<String> = mutableListOf()
 
     override fun exportCookie(): String = exportedCookie
 
@@ -142,7 +142,7 @@ internal open class RecordingTiktokGateway(
 
     override suspend fun expandShortUrl(url: String): String? {
         expandedShortUrls += url
-        return expandedUrls[url]
+        return expandedUrls[url] ?: expandedUrls[url.trimEnd('/')]
     }
 
     override suspend fun fetchAwemeSnapshot(awemeId: String, note: Boolean): TiktokAwemeSnapshot? {
@@ -181,8 +181,9 @@ internal open class RecordingTiktokGateway(
         awemeSnapshots.getOrPut(awemeId) { mutableListOf() }.addAll(snapshots)
     }
 
-    fun enqueueExpand(shortUrl: String, expanded: String) {
-        expandedUrls[shortUrl] = expanded
+    fun enqueueExpand(shortUrl: String, targetUrl: String) {
+        expandedUrls[shortUrl] = targetUrl
+        expandedUrls[shortUrl.trimEnd('/')] = targetUrl
     }
 }
 

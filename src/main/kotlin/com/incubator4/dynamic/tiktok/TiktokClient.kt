@@ -40,24 +40,9 @@ internal class TiktokClient(
     private val ssoHomeUri: URI = URI.create("$TIKTOK_SSO_HOME/"),
     private val qrCreateUri: URI = URI.create(TIKTOK_QR_CREATE_URL),
     private val qrCheckUriBuilder: (String, String) -> URI = { token, verifyFp ->
-        URI.create(
-            buildString {
-                append(TIKTOK_QR_CHECK_URL)
-                append("?service=")
-                append(URLEncoder.encode(TIKTOK_QR_SERVICE, StandardCharsets.UTF_8))
-                append("&need_logo=false&need_short_url=false")
-                append("&aid=")
-                append(TIKTOK_QR_AID)
-                append("&account_sdk_source=sso&sdk_version=2.2.7&language=zh")
-                append("&verifyFp=")
-                append(URLEncoder.encode(verifyFp, StandardCharsets.UTF_8))
-                append("&fp=")
-                append(URLEncoder.encode(verifyFp, StandardCharsets.UTF_8))
-                append("&token=")
-                append(URLEncoder.encode(token, StandardCharsets.UTF_8))
-            },
-        )
+        URI.create("$TIKTOK_QR_CHECK_URL?${tiktokQrQueryString(verifyFp = verifyFp, token = token)}")
     },
+    private val ttwidRegisterUri: URI? = URI.create(TIKTOK_TTWID_REGISTER_URL),
     private val qrPollIntervalMs: Long = TIKTOK_QR_POLL_INTERVAL_MS,
     private val qrTimeoutMs: Long = TIKTOK_QR_TIMEOUT_MS,
 ) {
@@ -116,13 +101,12 @@ internal class TiktokClient(
     suspend fun expandShortUrl(url: String): String {
         val normalized = normalizeTiktokInputUrl(url)
         require(normalized.isNotBlank()) { "抖音短链不能为空" }
-        val cookies = parseTiktokCookieInput(currentCookieHeader())
         return try {
             val response = send(
                 HttpRequest.newBuilder(URI.create(normalized))
                     .timeout(Duration.ofSeconds(8))
                     .GET()
-                    .applyCommonHeaders(cookies.header, referer = TIKTOK_HOME)
+                    .applyCommonHeaders("", referer = TIKTOK_HOME, userAgent = MOBILE_USER_AGENT)
                     .build(),
             )
             parseExpandResponse(response.statusCode(), response.uri().toString(), response.body())
@@ -138,20 +122,11 @@ internal class TiktokClient(
     suspend fun fetchAwemeSnapshot(awemeId: String, note: Boolean = false): TiktokAwemeSnapshot? {
         val normalized = awemeId.trim()
         require(normalized.isNotBlank()) { "抖音作品 ID 不能为空" }
-        val cookies = parseTiktokCookieInput(currentCookieHeader())
-        if (cookies.isEmpty()) {
-            throw TiktokLoginException("抖音 Cookie 未配置")
-        }
-        if (!cookies.hasLoginSession()) {
-            throw TiktokLoginException(
-                "抖音 Cookie 缺少登录会话，请从已登录的浏览器导入包含 sessionid 的完整 Cookie",
-            )
-        }
         return try {
             val shareSnapshot = try {
                 fetchAwemeSnapshotFrom(
                     uri = shareAwemeUriBuilder(normalized, note),
-                    cookieHeader = cookies.header,
+                    cookieHeader = "",
                     awemeId = normalized,
                     referer = "$TIKTOK_SHARE_HOME/",
                     userAgent = MOBILE_USER_AGENT,
@@ -175,7 +150,7 @@ internal class TiktokClient(
             val desktopSnapshot = try {
                 fetchAwemeSnapshotFrom(
                     uri = awemeUriBuilder(normalized, note),
-                    cookieHeader = cookies.header,
+                    cookieHeader = "",
                     awemeId = normalized,
                     referer = awemeLink(normalized, note),
                     userAgent = DESKTOP_USER_AGENT,
@@ -244,8 +219,10 @@ internal class TiktokClient(
             .build()
 
         try {
+            val verifyFp = generateTiktokVerifyFp()
+            cookieManager.putDouyinCookie("s_v_web_id", verifyFp)
             warmUpQrSession(qrClient)
-            val session = createQrSession(qrClient)
+            val session = createQrSession(qrClient, verifyFp)
             onQrCode(session.toChallenge())
             onStatusChanged(
                 PublisherLoginResult(
@@ -510,38 +487,56 @@ internal class TiktokClient(
                     HttpRequest.newBuilder(uri)
                         .timeout(Duration.ofSeconds(15))
                         .GET()
-                        .applyCommonHeaders("")
+                        .applyQrHeaders(client)
+                        .build(),
+                )
+            }
+        }
+        warmUpTtwid(client)
+    }
+
+    private suspend fun warmUpTtwid(client: HttpClient) {
+        val uri = ttwidRegisterUri ?: return
+        runCatching {
+            val response = sendWithClient(
+                client,
+                HttpRequest.newBuilder(uri)
+                    .timeout(Duration.ofSeconds(15))
+                    .header("Content-Type", "application/json; charset=utf-8")
+                    .POST(HttpRequest.BodyPublishers.ofString(TIKTOK_TTWID_REGISTER_BODY))
+                    .applyQrHeaders(client)
+                    .build(),
+            )
+            val redirect = firstHttpUrl(
+                runCatching {
+                    parseJsonObject(response.body(), "ttwid").string("redirect_url")
+                }.getOrNull(),
+            )
+            if (!redirect.isNullOrBlank()) {
+                sendWithClient(
+                    client,
+                    HttpRequest.newBuilder(URI.create(redirect))
+                        .timeout(Duration.ofSeconds(15))
+                        .GET()
+                        .applyQrHeaders(client)
                         .build(),
                 )
             }
         }
     }
 
-    private suspend fun createQrSession(client: HttpClient): TiktokQrCodeSession {
-        val verifyFp = generateTiktokVerifyFp()
+    private suspend fun createQrSession(
+        client: HttpClient,
+        verifyFp: String,
+    ): TiktokQrCodeSession {
         val separator = if (qrCreateUri.query == null) "?" else "&"
-        val createUri = URI.create(
-            buildString {
-                append(qrCreateUri)
-                append(separator)
-                append("service=")
-                append(URLEncoder.encode(TIKTOK_QR_SERVICE, StandardCharsets.UTF_8))
-                append("&need_logo=false&need_short_url=false")
-                append("&aid=")
-                append(TIKTOK_QR_AID)
-                append("&account_sdk_source=sso&sdk_version=2.2.7&language=zh")
-                append("&verifyFp=")
-                append(URLEncoder.encode(verifyFp, StandardCharsets.UTF_8))
-                append("&fp=")
-                append(URLEncoder.encode(verifyFp, StandardCharsets.UTF_8))
-            },
-        )
+        val createUri = URI.create("$qrCreateUri$separator${tiktokQrQueryString(verifyFp)}")
         val response = sendWithClient(
             client,
             HttpRequest.newBuilder(createUri)
                 .timeout(Duration.ofSeconds(15))
                 .GET()
-                .applyCommonHeaders("")
+                .applyQrHeaders(client)
                 .build(),
         )
         if (looksLikeRiskControl(code = null, message = "", httpStatus = response.statusCode())) {
@@ -563,7 +558,7 @@ internal class TiktokClient(
             HttpRequest.newBuilder(qrCheckUriBuilder(session.token, session.verifyFp))
                 .timeout(Duration.ofSeconds(15))
                 .GET()
-                .applyCommonHeaders("")
+                .applyQrHeaders(client)
                 .build(),
         )
         if (looksLikeRiskControl(code = null, message = "", httpStatus = response.statusCode())) {
@@ -589,7 +584,7 @@ internal class TiktokClient(
                     HttpRequest.newBuilder(URI.create(redirectUrl))
                         .timeout(Duration.ofSeconds(20))
                         .GET()
-                        .applyCommonHeaders("")
+                        .applyQrHeaders(client)
                         .build(),
                 )
             }
@@ -600,7 +595,7 @@ internal class TiktokClient(
                 HttpRequest.newBuilder(homeUri)
                     .timeout(Duration.ofSeconds(15))
                     .GET()
-                    .applyCommonHeaders("")
+                    .applyQrHeaders(client)
                     .build(),
             )
         }
@@ -669,6 +664,28 @@ private fun HttpRequest.Builder.applyCommonHeaders(
     return this
 }
 
+private fun HttpRequest.Builder.applyQrHeaders(client: HttpClient): HttpRequest.Builder {
+    applyCommonHeaders("")
+    val csrf = (client.cookieHandler().orElse(null) as? CookieManager)
+        ?.cookieStore
+        ?.cookies
+        ?.firstOrNull { cookie ->
+            cookie.name.equals("passport_csrf_token", ignoreCase = true) && !cookie.hasExpired()
+        }
+        ?.value
+    if (!csrf.isNullOrBlank()) {
+        header("x-tt-passport-csrf-token", csrf)
+    }
+    return this
+}
+
+private fun CookieManager.putDouyinCookie(name: String, value: String) {
+    val cookie = HttpCookie(name, value).apply {
+        domain = ".douyin.com"
+        path = "/"
+    }
+    cookieStore.add(URI.create(TIKTOK_HOME), cookie)
+}
 
 private fun CookieManager.toCookieHeader(): String {
     return cookieStore.cookies
@@ -683,10 +700,3 @@ private const val DESKTOP_USER_AGENT: String =
 
 private const val MOBILE_USER_AGENT: String =
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
-
-private fun looksLikeHtml(body: String): Boolean {
-    val value = body.lowercase()
-    return value.startsWith("<!doctype html") ||
-        value.startsWith("<html") ||
-        value.contains("<title>")
-}

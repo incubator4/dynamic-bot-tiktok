@@ -17,16 +17,18 @@ class TiktokClientTest {
     @Test
     fun `check login state reads account from passport endpoint`() = runBlocking {
         val server = HttpServer.create(InetSocketAddress(0), 0)
-        server.createContext("/passport/web/account/info/") { exchange ->
+        server.createContext("/aweme/v1/passport/account/info/v2/") { exchange ->
             val cookie = exchange.requestHeaders.getFirst("Cookie").orEmpty()
             val query = exchange.requestURI.query.orEmpty()
             val body = when {
-                !query.contains("aid=6383") ->
+                query.contains("aid=6383") ->
+                    """{"message":"error","data":{"error_code":1105,"description":"该应用无权限"}}"""
+                !query.contains("aid=2906") ->
                     """{"message":"error","data":{"error_code":1041,"description":"用户不存在"}}"""
                 cookie.contains("sessionid=valid") ->
-                    """{"message":"success","data":{"user_id_str":"u1","screen_name":"登录用户"}}"""
+                    """{"status_code":0,"user":{"sec_uid":"u1","nickname":"登录用户"}}"""
                 else ->
-                    """{"message":"success","data":{}}"""
+                    """{"status_code":0,"user":{}}"""
             }
             val bytes = body.toByteArray()
             exchange.sendResponseHeaders(200, bytes.size.toLong())
@@ -35,7 +37,7 @@ class TiktokClientTest {
         server.start()
         try {
             val uri = URI.create(
-                "http://127.0.0.1:${server.address.port}/passport/web/account/info/?aid=6383&account_sdk_source=web",
+                "http://127.0.0.1:${server.address.port}/aweme/v1/passport/account/info/v2/?aid=2906",
             )
             val httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(2))
@@ -60,12 +62,23 @@ class TiktokClientTest {
                 config = TiktokPublisherConfig(cookie = "sessionid=valid; ttwid=token"),
                 httpClient = httpClient,
                 accountInfoUri = URI.create(
-                    "http://127.0.0.1:${server.address.port}/passport/web/account/info/",
+                    "http://127.0.0.1:${server.address.port}/aweme/v1/passport/account/info/v2/",
                 ),
             ).checkLoginState()
             assertEquals(PublisherLoginStatus.FAILED, missingAid.status)
             assertTrue(missingAid.message.contains("Cookie"))
             assertTrue(missingAid.message.contains("sessionid"))
+
+            val webAidDenied = TiktokClient(
+                config = TiktokPublisherConfig(cookie = "sessionid=valid; ttwid=token"),
+                httpClient = httpClient,
+                accountInfoUri = URI.create(
+                    "http://127.0.0.1:${server.address.port}/aweme/v1/passport/account/info/v2/?aid=6383",
+                ),
+            ).checkLoginState()
+            assertEquals(PublisherLoginStatus.FAILED, webAidDenied.status)
+            assertTrue(webAidDenied.message.contains("无权限"))
+            assertTrue(webAidDenied.message.contains("扫码"))
         } finally {
             server.stop(0)
         }
@@ -329,6 +342,34 @@ class TiktokClientTest {
         }
     }
 
+    @Test
+    fun `loginByQrCode treats html create response as risk control`() = runBlocking {
+        val server = HttpServer.create(InetSocketAddress(0), 0)
+        server.createContext("/") { exchange ->
+            exchange.sendResponseHeaders(200, 0)
+            exchange.responseBody.close()
+        }
+        server.createContext("/get_qrcode/") { exchange ->
+            val body = "<!doctype html><html><head><script></script></head><body>login</body></html>"
+            val bytes = body.toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        try {
+            val base = "http://127.0.0.1:${server.address.port}"
+            val outcome = qrClient(base).loginByQrCode(onQrCode = {}, onStatusChanged = {})
+            assertEquals(PublisherLoginStatus.FAILED, outcome.result.status)
+            assertTrue(
+                outcome.result.message.contains("风控") ||
+                    outcome.result.message.contains("网页") ||
+                    outcome.result.message.contains("Cookie"),
+            )
+        } finally {
+            server.stop(0)
+        }
+    }
+
     private fun qrClient(
         base: String,
         pollIntervalMs: Long = 10,
@@ -342,6 +383,7 @@ class TiktokClientTest {
             ssoHomeUri = URI.create("$base/"),
             qrCreateUri = URI.create("$base/get_qrcode/"),
             qrCheckUriBuilder = { token, _ -> URI.create("$base/check_qrconnect/?token=$token") },
+            ttwidRegisterUri = null,
             qrPollIntervalMs = pollIntervalMs,
             qrTimeoutMs = timeoutMs,
         )

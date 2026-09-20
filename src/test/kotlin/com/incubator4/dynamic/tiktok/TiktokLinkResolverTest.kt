@@ -1,7 +1,6 @@
 package com.incubator4.dynamic.tiktok
 
 import kotlinx.coroutines.runBlocking
-import top.colter.dynamic.core.data.LiveStatus
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.link.LinkKinds
 import top.colter.dynamic.core.link.LinkResolution
@@ -14,10 +13,12 @@ import kotlin.test.assertTrue
 
 class TiktokLinkResolverTest {
     private val platformId = PlatformId.of(TIKTOK_PLATFORM_ID)
+    private val awemeId = "7123456789012345678"
+    private val userId = "MS4wLjABAAAAtest"
     private val aweme = TiktokAwemeSnapshot(
-        awemeId = "7123456789012345678",
+        awemeId = awemeId,
         description = "测试作品",
-        authorUserId = "MS4wLjABAAAAtest",
+        authorUserId = userId,
         authorName = "测试作者",
         authorAvatarUrl = "https://example.com/avatar.png",
         coverUrl = "https://example.com/cover.jpg",
@@ -25,124 +26,140 @@ class TiktokLinkResolverTest {
         likeCount = 12000,
         playCount = 100000,
     )
-    private val user = TiktokLiveSnapshot(
-        userId = "MS4wLjABAAAAtest",
-        status = LiveStatus.CLOSE,
-        nickname = "测试作者",
-        avatarUrl = "https://example.com/avatar.png",
-        uniqueId = "tester",
-        signature = "简介",
-        profileFound = true,
-    )
 
     @Test
     fun `parse video note user and share links`() = runBlocking {
-        val resolver = resolver()
+        val resolver = TiktokLinkResolver(platformId)
 
-        val video = assertNotNull(resolver.parseLink("https://www.douyin.com/video/7123456789012345678"))
-        val note = assertNotNull(resolver.parseLink("https://www.douyin.com/note/7123456789012345678。"))
-        val userLink = assertNotNull(resolver.parseLink("https://www.douyin.com/user/MS4wLjABAAAAtest"))
-        val share = assertNotNull(resolver.parseLink("https://www.iesdouyin.com/share/video/7123456789012345678"))
+        val video = assertNotNull(resolver.parseLink("https://www.douyin.com/video/$awemeId"))
+        val note = assertNotNull(resolver.parseLink("https://www.douyin.com/note/$awemeId。"))
+        val userLink = assertNotNull(resolver.parseLink("https://www.douyin.com/user/$userId"))
+        val share = assertNotNull(resolver.parseLink("https://www.iesdouyin.com/share/video/$awemeId"))
         val modal = assertNotNull(
-            resolver.parseLink("https://www.douyin.com/user/MS4wLjABAAAAtest?modal_id=7123456789012345678"),
+            resolver.parseLink("https://www.douyin.com/user/$userId?modal_id=$awemeId"),
         )
 
         assertEquals(LinkKinds.VIDEO, video.kind)
-        assertEquals("7123456789012345678", video.targetId)
-        assertEquals("https://www.douyin.com/video/7123456789012345678", video.normalizedUrl)
+        assertEquals(awemeId, video.targetId)
+        assertEquals("https://www.douyin.com/video/$awemeId", video.normalizedUrl)
         assertEquals(LinkKinds.DYNAMIC, note.kind)
-        assertEquals("https://www.douyin.com/note/7123456789012345678", note.normalizedUrl)
+        assertEquals("https://www.douyin.com/note/$awemeId", note.normalizedUrl)
         assertEquals(LinkKinds.USER, userLink.kind)
-        assertEquals("MS4wLjABAAAAtest", userLink.targetId)
+        assertEquals(userId, userLink.targetId)
         assertEquals(LinkKinds.VIDEO, share.kind)
         assertEquals(LinkKinds.VIDEO, modal.kind)
-        assertEquals("7123456789012345678", modal.targetId)
+        assertEquals(awemeId, modal.targetId)
         assertTrue(resolver.matchesLink("https://v.douyin.com/iPxxxx/"))
         assertFalse(resolver.matchesLink("https://www.tiktok.com/@user/video/1"))
         assertNull(resolver.parseLink("https://www.tiktok.com/@user/video/1"))
     }
 
     @Test
-    fun `expand short link then parse video`() = runBlocking {
+    fun `short link parse succeeds but resolve fails without expand`() = runBlocking {
+        val resolver = TiktokLinkResolver(platformId)
+
+        val parsed = assertNotNull(resolver.parseLink("https://v.douyin.com/iPxxxx"))
+        assertEquals(TIKTOK_SHORT_LINK_KIND, parsed.kind)
+        assertEquals("iPxxxx", parsed.targetId)
+        assertEquals("https://v.douyin.com/iPxxxx", parsed.sourceUrl)
+
+        val resolution = resolver.resolveLink(parsed)
+
+        assertTrue(resolution is LinkResolution.Failed)
+        assertTrue(resolution.reason.contains("短链"))
+        assertTrue(resolution.reason.contains("完整"))
+    }
+
+    @Test
+    fun `short link expand then resolve author and cover`() = runBlocking {
         val gateway = RecordingTiktokGateway()
         gateway.enqueueExpand(
             "https://v.douyin.com/iPxxxx",
-            "https://www.iesdouyin.com/share/video/7123456789012345678",
+            "https://www.iesdouyin.com/share/video/$awemeId",
         )
-        val resolver = resolver(gateway)
+        gateway.enqueueAweme(awemeId, aweme)
+        val resolver = TiktokLinkResolver(platformId) { gateway }
 
         val parsed = assertNotNull(resolver.parseLink("https://v.douyin.com/iPxxxx"))
-        assertEquals(LinkKinds.VIDEO, parsed.kind)
-        assertEquals("7123456789012345678", parsed.targetId)
-        assertEquals("https://v.douyin.com/iPxxxx", parsed.sourceUrl)
+        val resolution = resolver.resolveLink(parsed)
+
+        assertTrue(resolution is LinkResolution.Preview)
+        assertEquals(userId, resolution.preview.publisher?.externalId)
+        assertEquals("测试作者", resolution.preview.publisher?.name)
+        assertEquals("https://example.com/cover.jpg", resolution.preview.cover?.uri)
         assertEquals(listOf("https://v.douyin.com/iPxxxx"), gateway.expandedShortUrls)
     }
 
     @Test
-    fun `resolve video preview`() = runBlocking {
-        val gateway = RecordingTiktokGateway()
-        gateway.enqueueAweme(aweme.awemeId, aweme)
-        val resolver = resolver(gateway)
-        val parsed = assertNotNull(resolver.parseLink("https://www.douyin.com/video/${aweme.awemeId}"))
+    fun `resolve video preview from url without fetching`() = runBlocking {
+        val resolver = TiktokLinkResolver(platformId)
+        val parsed = assertNotNull(resolver.parseLink("https://www.douyin.com/video/$awemeId"))
 
         val resolution = resolver.resolveLink(parsed)
 
         assertTrue(resolution is LinkResolution.Preview)
         assertEquals(LinkKinds.VIDEO, resolution.preview.kind)
-        assertEquals("测试作品", resolution.preview.title)
+        assertEquals("抖音视频 $awemeId", resolution.preview.title)
         assertEquals("视频", resolution.preview.badge)
-        assertEquals(15, resolution.preview.durationSeconds)
-        assertEquals("MS4wLjABAAAAtest", resolution.preview.publisher?.externalId)
+        assertEquals("https://www.douyin.com/video/$awemeId", resolution.preview.url)
+        assertNull(resolution.preview.publisher)
+        assertNull(resolution.preview.cover)
+    }
+
+    @Test
+    fun `resolve video preview fills author and cover`() = runBlocking {
+        val gateway = RecordingTiktokGateway()
+        gateway.enqueueAweme(awemeId, aweme)
+        val resolver = TiktokLinkResolver(platformId) { gateway }
+        val parsed = assertNotNull(resolver.parseLink("https://www.douyin.com/video/$awemeId"))
+
+        val resolution = resolver.resolveLink(parsed)
+
+        assertTrue(resolution is LinkResolution.Preview)
+        assertEquals("测试作品", resolution.preview.title)
+        assertEquals(userId, resolution.preview.publisher?.externalId)
         assertEquals("测试作者", resolution.preview.publisher?.name)
         assertEquals("https://example.com/cover.jpg", resolution.preview.cover?.uri)
         assertEquals("1.2万", resolution.preview.metrics.first { it.key == "like" }.display)
     }
 
     @Test
-    fun `resolve note preview as gallery`() = runBlocking {
-        val gateway = RecordingTiktokGateway()
-        gateway.enqueueAweme(
-            aweme.awemeId,
-            aweme.copy(isNote = true, durationSeconds = null, description = "一组图"),
-        )
-        val resolver = resolver(gateway)
-        val parsed = assertNotNull(resolver.parseLink("https://www.douyin.com/note/${aweme.awemeId}"))
+    fun `resolve note preview as gallery without fetching`() = runBlocking {
+        val resolver = TiktokLinkResolver(platformId)
+        val parsed = assertNotNull(resolver.parseLink("https://www.douyin.com/note/$awemeId"))
 
         val resolution = resolver.resolveLink(parsed)
 
         assertTrue(resolution is LinkResolution.Preview)
         assertEquals(LinkKinds.DYNAMIC, resolution.preview.kind)
         assertEquals("图集", resolution.preview.badge)
+        assertEquals("抖音图集 $awemeId", resolution.preview.title)
         assertNull(resolution.preview.durationSeconds)
     }
 
     @Test
-    fun `resolve user preview`() = runBlocking {
-        val gateway = RecordingTiktokGateway()
-        gateway.enqueueLive(user.userId, user)
-        val resolver = resolver(gateway)
-        val parsed = assertNotNull(resolver.parseLink("https://www.douyin.com/user/${user.userId}"))
+    fun `resolve user preview from url without fetching`() = runBlocking {
+        val resolver = TiktokLinkResolver(platformId)
+        val parsed = assertNotNull(resolver.parseLink("https://www.douyin.com/user/$userId"))
 
         val resolution = resolver.resolveLink(parsed)
 
         assertTrue(resolution is LinkResolution.Preview)
         assertEquals(LinkKinds.USER, resolution.preview.kind)
-        assertEquals("测试作者", resolution.preview.title)
-        assertTrue(resolution.preview.description.contains("tester"))
-        assertEquals(user.userId, resolution.preview.publisher?.externalId)
-        assertEquals("测试作者", resolution.preview.publisher?.name)
-        assertEquals("https://example.com/avatar.png", resolution.preview.cover?.uri)
+        assertEquals("抖音用户 $userId", resolution.preview.title)
+        assertEquals(userId, resolution.preview.publisher?.externalId)
     }
 
     @Test
-    fun `missing aweme returns chinese failure`() = runBlocking {
-        val resolver = resolver(RecordingTiktokGateway())
-        val parsed = assertNotNull(resolver.parseLink("https://www.douyin.com/video/${aweme.awemeId}"))
+    fun `unsupported parsed kind returns chinese failure`() = runBlocking {
+        val resolver = TiktokLinkResolver(platformId)
+        val parsed = assertNotNull(resolver.parseLink("https://www.douyin.com/video/$awemeId"))
+            .copy(kind = "unknown")
 
         val resolution = resolver.resolveLink(parsed)
 
         assertTrue(resolution is LinkResolution.Failed)
-        assertTrue(resolution.reason.contains("未找到抖音作品"))
+        assertTrue(resolution.reason.contains("不支持的抖音链接类型"))
     }
 
     @Test
@@ -154,18 +171,11 @@ class TiktokLinkResolverTest {
         )
         plugin.onLoad(testContext())
 
-        assertTrue(plugin.matchesLink("https://www.douyin.com/video/${aweme.awemeId}"))
-        val parsed = assertNotNull(plugin.parseLink("https://www.douyin.com/user/${user.userId}"))
+        assertTrue(plugin.matchesLink("https://www.douyin.com/video/$awemeId"))
+        val parsed = assertNotNull(plugin.parseLink("https://www.douyin.com/user/$userId"))
         assertEquals(LinkKinds.USER, parsed.kind)
-    }
-
-    private fun resolver(gateway: TiktokGateway = RecordingTiktokGateway()): TiktokLinkResolver {
-        return TiktokLinkResolver(
-            platformId = platformId,
-            gatewayProvider = { gateway },
-            requestFailureHandler = TiktokRequestFailureHandler(
-                configProvider = { TiktokPublisherConfig() },
-            ),
-        )
+        val resolution = plugin.resolveLink(parsed)
+        assertTrue(resolution is LinkResolution.Preview)
+        assertEquals("用户", resolution.preview.badge)
     }
 }

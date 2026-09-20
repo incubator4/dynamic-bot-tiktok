@@ -148,7 +148,6 @@ internal class TiktokPublisherRuntime() :
         linkResolver = TiktokLinkResolver(
             platformId = platformId,
             gatewayProvider = { gateway },
-            requestFailureHandler = requestFailureHandler,
         )
         liveStatusStore = liveStatusStoreFactory()
         detectTask = TaskDefinition(
@@ -305,7 +304,7 @@ internal class TiktokPublisherRuntime() :
         return if (::linkResolver.isInitialized) {
             linkResolver.parseLink(inputUrl)
         } else {
-            parseTiktokDirectLink(inputUrl, platformId)
+            parseTiktokLink(inputUrl, platformId)
         }
     }
 

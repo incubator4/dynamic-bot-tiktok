@@ -21,9 +21,7 @@ internal interface TiktokGateway {
 
     suspend fun expandShortUrl(url: String): String? = null
 
-    suspend fun fetchAwemeSnapshot(awemeId: String, note: Boolean = false): TiktokAwemeSnapshot? {
-        throw TiktokApiException("不支持抖音作品详情查询")
-    }
+    suspend fun fetchAwemeSnapshot(awemeId: String, note: Boolean = false): TiktokAwemeSnapshot? = null
 
     suspend fun loginByQrCode(
         onQrCode: suspend (PublisherQrLoginChallenge) -> Unit,
